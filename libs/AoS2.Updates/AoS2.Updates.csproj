@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Update-Manifest und Installationslogik. Wird von Launcher und ManifestBuilder genutzt.
+       Bewusst nicht in AoS2.Shared: Unity braucht diesen Code nicht. -->
+
+  <PropertyGroup>
+    <RootNamespace>AoS2.Updates</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AoS2.Updates.Tests" />
+  </ItemGroup>
+
+</Project>

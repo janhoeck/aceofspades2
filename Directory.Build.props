@@ -1,0 +1,21 @@
+<Project>
+
+  <!-- Gilt für alle .NET-Projekte im Repository. Unity liest diese Datei nicht. -->
+
+  <PropertyGroup>
+    <!-- Alle Build-Ausgaben (bin/obj) landen zentral in artifacts/.
+         Sonst würde Unity die obj-Ordner in libs/AoS2.Shared mitkompilieren. -->
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <Authors>Ace of Spades 2</Authors>
+    <Product>Ace of Spades 2</Product>
+    <Version>0.0.0</Version>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,40 @@
+# --- .NET ---
+artifacts/
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+.vs/
+.idea/
+TestResults/
+
+# --- Unity (client/) ---
+client/[Ll]ibrary/
+client/[Tt]emp/
+client/[Oo]bj/
+client/[Bb]uild/
+client/[Bb]uilds/
+client/[Ll]ogs/
+client/[Uu]ser[Ss]ettings/
+client/[Mm]emoryCaptures/
+client/[Rr]ecordings/
+client/*.csproj
+client/*.sln
+client/*.slnx
+client/.vsconfig
+client/.vscode/
+client/Assets/StreamingAssets/data/
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+crashlytics-build.properties
+
+# --- Secrets / lokale Konfiguration ---
+.env
+*.env.local
+appsettings.Development.json
+
+# --- OS ---
+Thumbs.db
+Desktop.ini
+.DS_Store

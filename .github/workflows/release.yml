@@ -1,0 +1,129 @@
+name: Release
+
+# Ein Release entsteht durch einen Git-Tag, z. B.:
+#   git tag v0.1.0
+#   git push origin v0.1.0
+# Einrichtung (Secrets, Variablen, Unity-Lizenz): docs/release.md
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write # für das GitHub-Release mit der Setup.exe
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  version:
+    name: Version bestimmen
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME ist keine gültige Version (erwartet v1.2.3)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+  test:
+    name: .NET bauen und testen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test AoS2.slnx --configuration Release
+
+  game:
+    name: Spiel bauen und hochladen
+    needs: [version, test]
+    # Erst einschalten, wenn die Unity-Lizenz als Secret eingetragen ist (Variable UNITY_CI_ENABLED = true).
+    # Bis dahin: lokal mit tools/release/build-game.ps1 -Upload
+    if: vars.UNITY_CI_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      # Unitys Library-Ordner zwischenspeichern, sonst importiert jeder Build alle Assets neu.
+      - uses: actions/cache@v4
+        with:
+          path: client/Library
+          key: unity-library-${{ hashFiles('client/Assets/**', 'client/Packages/**', 'client/ProjectSettings/**', 'libs/AoS2.Shared/**') }}
+          restore-keys: unity-library-
+
+      - name: Unity-Build (GameCI)
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: client
+          targetPlatform: StandaloneWindows64
+          buildName: AoS2
+          buildMethod: AoS2.Editor.BuildScript.BuildWindows
+          versioning: Custom
+          version: ${{ needs.version.outputs.version }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Manifest erzeugen und nach R2 hochladen
+        shell: pwsh
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          dotnet run --project tools/AoS2.ManifestBuilder -c Release -- `
+            --input build/StandaloneWindows64 --output release --version ${{ needs.version.outputs.version }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./tools/release/upload-game.ps1 -ReleaseDir release
+
+  launcher:
+    name: Launcher paketieren und hochladen
+    needs: [version, test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Velopack-Paket bauen und nach R2 hochladen
+        shell: pwsh
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: ./tools/release/pack-launcher.ps1 -Version ${{ needs.version.outputs.version }} -UpdateUrl "${{ vars.UPDATE_BASE_URL }}" -Upload
+
+      # Bequemer Download-Link für neue Spieler. Der Launcher selbst aktualisiert sich über R2.
+      - name: GitHub-Release mit Setup.exe
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "artifacts/release/launcher/AoS2.Launcher-win-Setup.exe#AoS2-Setup.exe" `
+            --title "Ace of Spades 2 ${{ needs.version.outputs.version }}" --generate-notes

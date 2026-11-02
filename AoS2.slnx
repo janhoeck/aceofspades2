@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/launcher/">
+    <Project Path="launcher/AoS2.Launcher.Tests/AoS2.Launcher.Tests.csproj" />
+    <Project Path="launcher/AoS2.Launcher/AoS2.Launcher.csproj" />
+  </Folder>
+  <Folder Name="/libs/">
+    <Project Path="libs/AoS2.Shared.Tests/AoS2.Shared.Tests.csproj" />
+    <Project Path="libs/AoS2.Shared/AoS2.Shared.csproj" />
+    <Project Path="libs/AoS2.Updates.Tests/AoS2.Updates.Tests.csproj" />
+    <Project Path="libs/AoS2.Updates/AoS2.Updates.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/AoS2.ManifestBuilder.Tests/AoS2.ManifestBuilder.Tests.csproj" />
+    <Project Path="tools/AoS2.ManifestBuilder/AoS2.ManifestBuilder.csproj" />
+  </Folder>
+</Solution>

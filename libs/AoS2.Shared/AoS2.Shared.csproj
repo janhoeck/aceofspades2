@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Wird von Client (Unity) und Server genutzt.
+       Regeln: keine Unity-Referenzen, maximal C# 9, nur .NET Standard 2.1-APIs. -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <RootNamespace>AoS2.Shared</RootNamespace>
+    <!-- Unity kompiliert ohne Nullable-Kontext; mit "enable" gäbe es dort Warnungen. -->
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Dateien des Unity-Packages gehören nicht in den .NET-Build. -->
+    <None Remove="**/*.meta" />
+  </ItemGroup>
+
+</Project>

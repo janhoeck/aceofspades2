@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>AoS2.Launcher</RootNamespace>
+    <AssemblyName>AoS2.Launcher</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+
+    <!-- Basis-URL des Update-Speichers (R2), ohne „/“ am Ende. Die CI setzt sie beim Veröffentlichen:
+         dotnet publish -p:AoS2UpdateUrl=https://…
+         Zum Testen geht auch die Umgebungsvariable AOS2_UPDATE_URL (URL oder Ordner). -->
+    <AoS2UpdateUrl Condition="'$(AoS2UpdateUrl)' == ''"></AoS2UpdateUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Schriften Bungee und Barlow (SIL Open Font License, siehe OFL-*.txt) -->
+    <AvaloniaResource Include="Assets\Fonts\*.ttf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="AoS2UpdateUrl" Value="$(AoS2UpdateUrl)" />
+    <InternalsVisibleTo Include="AoS2.Launcher.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.5" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\libs\AoS2.Updates\AoS2.Updates.csproj" />
+  </ItemGroup>
+
+</Project>

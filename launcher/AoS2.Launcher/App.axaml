@@ -1,0 +1,160 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="AoS2.Launcher.App"
+             RequestedThemeVariant="Dark">
+
+  <!-- Design „Voxel-Schlachtfeld“: Farben und Bausteine aus dem Stilblatt in Claude Design. -->
+  <Application.Resources>
+    <FontFamily x:Key="DisplayFont">avares://AoS2.Launcher/Assets/Fonts#Bungee</FontFamily>
+    <FontFamily x:Key="BodyFont">avares://AoS2.Launcher/Assets/Fonts#Barlow</FontFamily>
+
+    <SolidColorBrush x:Key="Gold" Color="#F2C14E" />
+    <SolidColorBrush x:Key="GoldHover" Color="#F7CF6B" />
+    <SolidColorBrush x:Key="GoldPressed" Color="#D9A93A" />
+    <SolidColorBrush x:Key="GoldEdge" Color="#A9801F" />
+    <SolidColorBrush x:Key="OnGold" Color="#2B1E06" />
+    <SolidColorBrush x:Key="TitleShadow" Color="#3A2A12" />
+    <SolidColorBrush x:Key="Night" Color="#14181F" />
+    <SolidColorBrush x:Key="NightDeep" Color="#0B0E13" />
+    <SolidColorBrush x:Key="TitleBar" Color="#0F1218" />
+    <SolidColorBrush x:Key="Divider" Color="#1E2430" />
+    <SolidColorBrush x:Key="Stone" Color="#2A3240" />
+    <SolidColorBrush x:Key="StoneHover" Color="#343E4F" />
+    <SolidColorBrush x:Key="StoneEdge" Color="#1A2029" />
+    <SolidColorBrush x:Key="Sand" Color="#EDE6D3" />
+    <SolidColorBrush x:Key="SandMuted" Color="#C9C2AF" />
+    <SolidColorBrush x:Key="Hint" Color="#8B93A3" />
+    <SolidColorBrush x:Key="Coral" Color="#E07A5F" />
+    <SolidColorBrush x:Key="CoralText" Color="#F0977E" />
+    <SolidColorBrush x:Key="Grass" Color="#7E9A4A" />
+
+    <!-- Fluent-Akzent (Checkbox, Fokus) auf Gold umstellen -->
+    <Color x:Key="SystemAccentColor">#F2C14E</Color>
+    <Color x:Key="SystemAccentColorLight1">#F7CF6B</Color>
+    <Color x:Key="SystemAccentColorDark1">#D9A93A</Color>
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundChecked" Color="#2B1E06" />
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPointerOver" Color="#2B1E06" />
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPressed" Color="#2B1E06" />
+
+    <!-- Buttons sind Blöcke: unten eine dunkle Kante. Beim Drücken wandert sie nach oben, der Block sinkt ein. -->
+    <ControlTheme x:Key="BlockButton" TargetType="Button">
+      <Setter Property="Background" Value="{StaticResource Stone}" />
+      <Setter Property="Foreground" Value="{StaticResource Sand}" />
+      <Setter Property="BorderBrush" Value="{StaticResource StoneEdge}" />
+      <Setter Property="BorderThickness" Value="0,0,0,4" />
+      <Setter Property="Padding" Value="18,0" />
+      <Setter Property="Height" Value="48" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Name="PART_Block"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              Foreground="{TemplateBinding Foreground}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+
+      <Style Selector="^:pointerover">
+        <Setter Property="Background" Value="{StaticResource StoneHover}" />
+      </Style>
+      <Style Selector="^:pressed">
+        <Setter Property="BorderThickness" Value="0,4,0,0" />
+      </Style>
+      <Style Selector="^:disabled">
+        <Setter Property="Opacity" Value="0.45" />
+        <Setter Property="Cursor" Value="Arrow" />
+      </Style>
+      <Style Selector="^:focus-visible /template/ Border#PART_Block">
+        <Setter Property="BoxShadow" Value="0 0 0 2 #F2C14E" />
+      </Style>
+
+      <!-- Hauptaktion: Gold mit Blockschrift -->
+      <Style Selector="^.primary">
+        <Setter Property="Background" Value="{StaticResource Gold}" />
+        <Setter Property="Foreground" Value="{StaticResource OnGold}" />
+        <Setter Property="BorderBrush" Value="{StaticResource GoldEdge}" />
+        <Setter Property="BorderThickness" Value="0,0,0,5" />
+        <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="FontSize" Value="18" />
+        <Setter Property="Padding" Value="34,0" />
+      </Style>
+      <Style Selector="^.primary:pointerover">
+        <Setter Property="Background" Value="{StaticResource GoldHover}" />
+      </Style>
+      <Style Selector="^.primary:pressed">
+        <Setter Property="Background" Value="{StaticResource GoldPressed}" />
+        <Setter Property="BorderThickness" Value="0,5,0,0" />
+      </Style>
+      <Style Selector="^.primary:focus-visible /template/ Border#PART_Block">
+        <Setter Property="BoxShadow" Value="0 0 0 2 #EDE6D3" />
+      </Style>
+
+      <!-- Der große „Spielen“-Block -->
+      <Style Selector="^.play">
+        <Setter Property="Height" Value="72" />
+        <Setter Property="FontSize" Value="30" />
+        <Setter Property="Padding" Value="56,0" />
+        <Setter Property="BorderThickness" Value="0,0,0,6" />
+      </Style>
+      <Style Selector="^.play:pressed">
+        <Setter Property="BorderThickness" Value="0,6,0,0" />
+      </Style>
+
+      <Style Selector="^.small">
+        <Setter Property="Height" Value="44" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="BorderThickness" Value="0,0,0,3" />
+      </Style>
+      <Style Selector="^.small:pressed">
+        <Setter Property="BorderThickness" Value="0,3,0,0" />
+      </Style>
+    </ControlTheme>
+
+    <!-- Knöpfe der eigenen Titelleiste -->
+    <ControlTheme x:Key="TitleBarButton" TargetType="Button">
+      <Setter Property="Width" Value="44" />
+      <Setter Property="Height" Value="32" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{StaticResource Hint}" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Name="PART_Block" Background="{TemplateBinding Background}">
+            <ContentPresenter Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+      <Style Selector="^:pointerover">
+        <Setter Property="Background" Value="{StaticResource Divider}" />
+        <Setter Property="Foreground" Value="{StaticResource Sand}" />
+      </Style>
+      <Style Selector="^.close:pointerover">
+        <Setter Property="Background" Value="#C42B1C" />
+        <Setter Property="Foreground" Value="White" />
+      </Style>
+      <Style Selector="^.active">
+        <Setter Property="Background" Value="{StaticResource Divider}" />
+        <Setter Property="Foreground" Value="{StaticResource Sand}" />
+      </Style>
+      <Style Selector="^:focus-visible /template/ Border#PART_Block">
+        <Setter Property="BoxShadow" Value="inset 0 0 0 2 #F2C14E" />
+      </Style>
+    </ControlTheme>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+
+</Application>

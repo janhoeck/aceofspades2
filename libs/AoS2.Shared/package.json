@@ -1,0 +1,7 @@
+{
+  "name": "com.aos2.shared",
+  "version": "0.0.0",
+  "displayName": "AoS2 Shared",
+  "description": "Gemeinsamer Code von Client und Server: Protokoll, Voxel-Welt, Bewegung, Spielregeln.",
+  "unity": "6000.0"
+}
