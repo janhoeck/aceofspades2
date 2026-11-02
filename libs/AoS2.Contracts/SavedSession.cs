@@ -23,8 +23,8 @@ namespace AoS2.Contracts
 
         public string Token { get; set; }
 
-        /// <summary>Backend, das das Token ausgestellt hat. Gilt das Token nur dort.</summary>
-        public string BackendUrl { get; set; }
+        /// <summary>Website (mit API unter <c>/api</c>), deren Backend das Token ausgestellt hat. Das Token gilt nur dort.</summary>
+        public string SiteUrl { get; set; }
 
         public Guid AccountId { get; set; }
 

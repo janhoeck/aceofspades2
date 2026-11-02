@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/* "Voxel battlefield" design: same colours as the launcher (launcher/AoS2.Launcher/App.axaml). */
+@theme {
+  --color-gold: #f2c14e;
+  --color-gold-hover: #f7cf6b;
+  --color-gold-pressed: #d9a93a;
+  --color-gold-edge: #a9801f;
+  --color-on-gold: #2b1e06;
+  --color-title-shadow: #3a2a12;
+  --color-sky: #1a2333;
+  --color-night: #14181f;
+  --color-night-deep: #0b0e13;
+  --color-title-bar: #0f1218;
+  --color-divider: #1e2430;
+  --color-stone: #2a3240;
+  --color-stone-hover: #343e4f;
+  --color-stone-edge: #1a2029;
+  --color-sand: #ede6d3;
+  --color-sand-muted: #c9c2af;
+  --color-hint: #8b93a3;
+  --color-coral: #e07a5f;
+  --color-coral-text: #f0977e;
+  --color-grass: #7e9a4a;
+  --color-blue: #2f6fe4;
+  --color-green: #3fa34d;
+
+  --font-display: var(--font-bungee), "Arial Black", sans-serif;
+  --font-sans: var(--font-barlow), "Segoe UI", system-ui, sans-serif;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-night);
+  color: var(--color-sand);
+  font-family: var(--font-sans);
+}
+
+/* Block lettering with an offset shadow, like the launcher title */
+.title-block {
+  font-family: var(--font-display);
+  color: var(--color-gold);
+  text-shadow: 4px 4px 0 var(--color-title-shadow);
+}
+
+/* Buttons are blocks: a dark edge at the bottom. When pressed it moves to the top and the block sinks in. */
+.block-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  height: 48px;
+  padding: 0 1.25rem;
+  border-bottom: 4px solid var(--color-stone-edge);
+  background: var(--color-stone);
+  color: var(--color-sand);
+  font-weight: 500;
+  cursor: pointer;
+}
+.block-button:hover {
+  background: var(--color-stone-hover);
+}
+.block-button:active {
+  border-bottom-width: 0;
+  border-top: 4px solid transparent;
+}
+.block-button:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+.block-button.primary {
+  background: var(--color-gold);
+  color: var(--color-on-gold);
+  border-bottom: 5px solid var(--color-gold-edge);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.05rem;
+  padding: 0 1.75rem;
+}
+.block-button.primary:hover {
+  background: var(--color-gold-hover);
+}
+.block-button.primary:active {
+  background: var(--color-gold-pressed);
+  border-bottom-width: 0;
+  border-top: 5px solid transparent;
+}

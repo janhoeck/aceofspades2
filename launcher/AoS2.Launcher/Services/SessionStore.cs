@@ -43,7 +43,7 @@ public sealed class SessionStore(string path, ISecretProtector protector)
                 return null;
             var json = protector.Unprotect(File.ReadAllBytes(Path));
             var session = JsonSerializer.Deserialize(json, LauncherJsonContext.Default.SavedSession);
-            return string.IsNullOrEmpty(session?.Token) || string.IsNullOrEmpty(session.BackendUrl) ? null : session;
+            return string.IsNullOrEmpty(session?.Token) || string.IsNullOrEmpty(session.SiteUrl) ? null : session;
         }
         catch (Exception ex) when (ex is CryptographicException or JsonException or IOException or UnauthorizedAccessException)
         {

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using AoS2.Backend.Auth;
 using AoS2.Contracts;
 using Microsoft.AspNetCore.WebUtilities;
@@ -11,7 +12,9 @@ public sealed class StartupTests
 {
     [Theory]
     [InlineData("Backend:PublicUrl", "")]
-    [InlineData("Backend:PublicUrl", "api.example.org")]
+    [InlineData("Backend:PublicUrl", "aos2.example.org")]
+    [InlineData("Backend:InternalKey", "")]
+    [InlineData("Backend:InternalKey", "zu-kurz")]
     [InlineData("Discord:ClientSecret", "")]
     [InlineData("JoinTickets:SigningKey", "")]
     [InlineData("JoinTickets:SigningKey", "kaputt")]
@@ -32,9 +35,9 @@ public sealed class StartupTests
     }
 
     [Fact]
-    public async Task DevelopmentWithoutSigningKey_UsesRandomKey()
+    public async Task Development_AllowsShortKey_AndRandomSigningKey()
     {
-        using var app = new BackendApp(new() { ["JoinTickets:SigningKey"] = "" }, environment: "Development");
+        using var app = new BackendApp(new() { ["JoinTickets:SigningKey"] = "", ["Backend:InternalKey"] = "kurz" }, environment: "Development");
 
         using var response = await app.CreateClient().GetAsync(ApiRoutes.JoinTicketKeys);
 
@@ -47,24 +50,20 @@ public sealed class StartupTests
         using var app = new BackendApp(
             new() { ["Discord:UseDevLogin"] = "true", ["Discord:ClientId"] = "", ["Discord:ClientSecret"] = "" },
             environment: "Development", fakeDiscord: false);
-        var browser = app.CreateBrowser();
         var (verifier, challenge) = BackendApp.CreatePkce();
 
-        // Login → Entwicklungsseite statt Discord
-        using var login = await browser.GetAsync(BackendApp.LoginUrl(challenge));
-        var devPage = login.Headers.Location!;
-        Assert.Equal(DevDiscordClient.AuthorizePath, devPage.AbsolutePath);
-        using var form = await browser.GetAsync(devPage.PathAndQuery);
-        Assert.Contains("Entwicklungs-Login", await form.Content.ReadAsStringAsync());
+        // Statt zu Discord geht es zur Entwicklungsseite der Website.
+        var start = await app.StartLoginAsync(challenge);
+        var devPage = new Uri(start.AuthorizeUrl);
+        Assert.Equal($"{BackendApp.PublicUrl}{DevDiscordClient.AuthorizePath}", devPage.GetLeftPart(UriPartial.Path));
+        Assert.Equal(start.AttemptId, QueryHelpers.ParseQuery(devPage.Query)["state"].ToString());
 
-        // Name eingeben → zurück zum Backend → weiter zum Launcher
-        var state = QueryHelpers.ParseQuery(devPage.Query)["state"];
-        using var approve = await browser.GetAsync($"{LoginEndpoints.DevApprovePath}?state={state}&name=Testspieler");
-        using var callback = await browser.GetAsync(approve.Headers.Location!.PathAndQuery);
-        var code = BackendApp.ParseLoopback(callback)[LoginParameters.Code];
+        // Die Website schickt den eingegebenen Namen als Code zurück.
+        using var complete = await app.CompleteLoginAsync(start.AttemptId, DevDiscordClient.CreateCode("Testspieler"));
+        var code = (await BackendApp.ParseLoopbackAsync(complete))[LoginParameters.Code];
 
         using var exchange = await app.ExchangeAsync(code, verifier);
-        var session = await System.Net.Http.Json.HttpContentJsonExtensions.ReadFromJsonAsync<SessionResponse>(exchange.Content);
+        var session = await exchange.Content.ReadFromJsonAsync<SessionResponse>();
         Assert.Equal("Testspieler", session!.Account.DisplayName);
     }
 }

@@ -121,7 +121,7 @@ public sealed class DiscordClient(HttpClient http, IOptions<DiscordOptions> opti
 
 /// <summary>
 /// Entwicklungs-Login ohne Discord (<see cref="DiscordOptions.UseDevLogin"/>): Die „Discord-Seite“ ist
-/// <c>/dev/discord/authorize</c> im Backend selbst, und der Code enthält einfach den eingegebenen Namen.
+/// <c>/dev/discord/authorize</c> auf der Website (nur mit AOS2_DEV_LOGIN=true), und der Code enthält einfach den eingegebenen Namen.
 /// </summary>
 public sealed class DevDiscordClient(string publicUrl) : IDiscordClient
 {

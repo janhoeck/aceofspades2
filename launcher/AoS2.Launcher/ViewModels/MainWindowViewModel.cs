@@ -49,7 +49,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _signInCancellation;
     private long _requiredBytes;
 
-    /// <param name="accounts">Discord-Login; <c>null</c>, wenn kein Backend eingestellt ist.</param>
+    /// <param name="accounts">Discord-Login; <c>null</c>, wenn keine Website-Adresse eingestellt ist.</param>
     /// <param name="createInstaller">Erzeugt den Installer für einen Spielordner; <c>null</c>, wenn kein Update-Server eingestellt ist.</param>
     public MainWindowViewModel(
         ILauncherUpdater launcherUpdater,
@@ -234,8 +234,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (_accounts is null)
         {
             ShowProblem("Kein Anmeldeserver eingestellt",
-                "Dieser Launcher wurde ohne Backend-Adresse gebaut.",
-                $"Zum Testen die Umgebungsvariable {LauncherOptions.BackendUrlVariable} setzen.");
+                "Dieser Launcher wurde ohne Server-Adresse gebaut.",
+                $"Zum Testen die Umgebungsvariable {LauncherOptions.SiteUrlVariable} setzen.");
             return false;
         }
 

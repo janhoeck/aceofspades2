@@ -243,14 +243,14 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task Start_NoBackendUrl_ShowsProblem()
+    public async Task Start_NoSiteUrl_ShowsProblem()
     {
         var vm = CreateViewModel(withBackend: false);
 
         await vm.StartCommand.ExecuteAsync(null);
 
         Assert.True(vm.HasProblem);
-        Assert.Contains(LauncherOptions.BackendUrlVariable, vm.HintText);
+        Assert.Contains(LauncherOptions.SiteUrlVariable, vm.HintText);
         Assert.False(vm.PlayCommand.CanExecute(null));
     }
 

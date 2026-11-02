@@ -7,7 +7,8 @@
       "applicationUrl": "http://localhost:5080",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "Backend__PublicUrl": "http://localhost:5080",
+        "Backend__PublicUrl": "http://localhost:3000",
+        "Backend__InternalKey": "nur-zum-entwickeln-kein-geheimnis",
         "ConnectionStrings__Postgres": "Host=127.0.0.1;Port=5433;Database=aos2;Username=aos2",
         "Discord__UseDevLogin": "true"
       }
@@ -18,7 +19,8 @@
       "applicationUrl": "http://localhost:5080",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "Backend__PublicUrl": "http://localhost:5080",
+        "Backend__PublicUrl": "http://localhost:3000",
+        "Backend__InternalKey": "nur-zum-entwickeln-kein-geheimnis",
         "ConnectionStrings__Postgres": "Host=127.0.0.1;Port=5433;Database=aos2;Username=aos2"
       }
     }

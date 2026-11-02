@@ -116,7 +116,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
-        run: ./tools/release/pack-launcher.ps1 -Version ${{ needs.version.outputs.version }} -UpdateUrl "${{ vars.UPDATE_BASE_URL }}" -BackendUrl "${{ vars.BACKEND_URL }}" -Upload
+        run: ./tools/release/pack-launcher.ps1 -Version ${{ needs.version.outputs.version }} -UpdateUrl "${{ vars.UPDATE_BASE_URL }}" -SiteUrl "${{ vars.SITE_URL }}" -Upload
 
       # Bequemer Download-Link für neue Spieler. Der Launcher selbst aktualisiert sich über R2.
       - name: GitHub-Release mit Setup.exe
@@ -128,10 +128,13 @@ jobs:
             "artifacts/release/launcher/AoS2.Launcher-win-Setup.exe#AoS2-Setup.exe" `
             --title "Ace of Spades 2 ${{ needs.version.outputs.version }}" --generate-notes
 
-  backend:
-    name: Backend-Image veröffentlichen
+  images:
+    name: Images veröffentlichen (${{ matrix.name }})
     needs: [version, test]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        name: [backend, web]
     permissions:
       contents: read
       packages: write # ghcr.io, mit dem automatischen GITHUB_TOKEN (kein eigenes Secret nötig)
@@ -144,16 +147,16 @@ jobs:
       - name: Image bauen und hochladen
         shell: bash
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/aos2-backend"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/aos2-${{ matrix.name }}"
           version="${{ needs.version.outputs.version }}"
-          docker build --file deploy/backend.Dockerfile --build-arg VERSION="$version" \
+          docker build --file deploy/${{ matrix.name }}.Dockerfile --build-arg VERSION="$version" \
             --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
             --tag "$image:$version" --tag "$image:latest" .
           docker push --all-tags "$image"
 
-  deploy-backend:
-    name: Backend auf Coolify aktualisieren
-    needs: backend
+  deploy:
+    name: Website und Backend auf Coolify aktualisieren
+    needs: images
     # Erst einschalten, wenn Coolify eingerichtet ist (Variable COOLIFY_ENABLED = true, Secrets siehe docs/backend.md).
     if: vars.COOLIFY_ENABLED == 'true'
     runs-on: ubuntu-latest

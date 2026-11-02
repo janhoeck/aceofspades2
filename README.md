@@ -11,7 +11,7 @@ Ein Team-Shooter (Blau gegen Grün) in einer vollständig zerstörbaren, blockar
 - [Assets](docs/assets.md) – Stil, Herstellung und Liste aller Grafiken, Modelle und Sounds
 - [Roadmap](docs/roadmap.md) – Meilensteine
 - [Releases und Updates](docs/release.md) – Launcher, Update-Speicher (Cloudflare R2), Release-Workflow
-- [Backend und Discord-Login](docs/backend.md) – Anmeldung, lokales Backend, Discord-App, Coolify
+- [Website, Backend und Discord-Login](docs/backend.md) – Anmeldung, lokal entwickeln, Discord-App, Coolify
 
 ## Aufbau des Repositories
 
@@ -26,6 +26,7 @@ Ein Team-Shooter (Blau gegen Grün) in einer vollständig zerstörbaren, blockar
 | `data/` | Blöcke, Klassen, Waffen als JSON |
 | `maps/` | Maps |
 | `assets-src/` | Quelldateien der Assets (Texturen, Modelle, Sounds) |
+| `web/` | Website (Next.js): Startseite, Discord-Login, reicht `/api` an das Backend durch |
 | `deploy/` | Deployment-Dateien für Coolify |
 | `docs/` | Dokumentation |
 
@@ -35,6 +36,7 @@ Ein Team-Shooter (Blau gegen Grün) in einer vollständig zerstörbaren, blockar
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - Unity 6 (über Unity Hub), Version siehe `client/ProjectSettings/ProjectVersion.txt`
 - Git + Git LFS
+- Für Website und Backend: Node.js 22 und PostgreSQL
 
 ## Bauen und testen
 
@@ -45,13 +47,14 @@ dotnet test AoS2.slnx
 
 Alle Build-Ausgaben landen in `artifacts/`. Den Unity-Client öffnet man über Unity Hub → *Add* → Ordner `client/`.
 
-Launcher und Spiel lokal ausprobieren, mit lokalem Backend und Entwicklungs-Login statt Discord (Details in [docs/backend.md](docs/backend.md#3-lokal-entwickeln) und [docs/release.md](docs/release.md#5-ohne-r2-lokal-testen)):
+Launcher und Spiel lokal ausprobieren, mit lokaler Website, lokalem Backend und Entwicklungs-Login statt Discord (Details in [docs/backend.md](docs/backend.md#3-lokal-entwickeln) und [docs/release.md](docs/release.md#5-ohne-r2-lokal-testen)):
 
 ```powershell
 ./tools/dev/dev-db.ps1                       # Datenbank (PostgreSQL muss installiert sein)
 dotnet run --project backend/AoS2.Backend    # Backend auf http://localhost:5080, in einem eigenen Terminal
+cd web; npm install; npm run dev; cd ..      # Website auf http://localhost:3000, in einem eigenen Terminal
 ./tools/release/build-game.ps1 -Version 0.1.0
 $env:AOS2_UPDATE_URL = "$PWD\artifacts\release"
-$env:AOS2_BACKEND_URL = "http://localhost:5080"
+$env:AOS2_SITE_URL = "http://localhost:3000"
 dotnet run --project launcher/AoS2.Launcher
 ```

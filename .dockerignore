@@ -1,4 +1,4 @@
-# Docker braucht nur die .NET-Quellen (siehe deploy/*.Dockerfile).
+# Docker braucht nur die Quellen von Backend und Website (siehe deploy/*.Dockerfile).
 **/bin/
 **/obj/
 artifacts/
@@ -12,3 +12,6 @@ docs/
 .idea/
 **/*.user
 **/appsettings.Development.json
+web/node_modules/
+web/.next/
+web/.env*

@@ -12,7 +12,8 @@ public sealed record LoopbackResult(string? Code, string? Error);
 
 /// <summary>
 /// Ein winziger Webserver nur für diesen einen Zweck: Er wartet auf <c>http://127.0.0.1:{Port}/callback</c>,
-/// bis das Backend den Browser mit dem Einmal-Code dorthin schickt, und zeigt dann eine Abschlussseite.
+/// bis die Website den Browser mit dem Einmal-Code dorthin schickt. Danach leitet er den Browser auf die
+/// Abschlussseite der Website weiter (ohne Website-Adresse: eine eigene schlichte Seite).
 /// <para>
 /// Lauscht nur auf 127.0.0.1 (von außen nicht erreichbar) und auf einem zufälligen freien Port. Bewusst ein
 /// einfacher TCP-Listener statt HttpListener: Der bräuchte unter Windows je nach Adresse Administratorrechte.
@@ -24,9 +25,12 @@ public sealed class LoopbackListener : IDisposable
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(10);
 
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+    private readonly string? _siteUrl;
 
-    public LoopbackListener()
+    /// <param name="siteUrl">Website mit den Seiten <see cref="SiteRoutes.LoginDone"/> und <see cref="SiteRoutes.LoginFailed"/>.</param>
+    public LoopbackListener(string? siteUrl = null)
     {
+        _siteUrl = siteUrl;
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
     }
@@ -68,7 +72,7 @@ public sealed class LoopbackListener : IDisposable
         return outcome;
     }
 
-    private static async Task HandleAsync(TcpClient client, string expectedState, TaskCompletionSource<LoopbackResult> result, CancellationToken cancellationToken)
+    private async Task HandleAsync(TcpClient client, string expectedState, TaskCompletionSource<LoopbackResult> result, CancellationToken cancellationToken)
     {
         using var _ = client;
         try
@@ -101,7 +105,11 @@ public sealed class LoopbackListener : IDisposable
             if (string.IsNullOrEmpty(code) && string.IsNullOrEmpty(error))
                 error = LoginErrors.DiscordFailed;
 
-            if (error is null)
+            if (_siteUrl is not null)
+                await RedirectAsync(stream, error is null
+                    ? _siteUrl + SiteRoutes.LoginDone
+                    : $"{_siteUrl}{SiteRoutes.LoginFailed}?reason={Uri.EscapeDataString(error)}");
+            else if (error is null)
                 await RespondAsync(stream, 200, "Angemeldet", "Du kannst dieses Fenster schließen und zum Launcher zurückkehren.", CancellationToken.None);
             else
                 await RespondAsync(stream, 200, "Anmeldung abgebrochen", "Im Launcher kannst du es noch einmal versuchen.", CancellationToken.None);
@@ -161,7 +169,15 @@ public sealed class LoopbackListener : IDisposable
         await stream.FlushAsync(cancellationToken);
     }
 
-    /// <summary>Gleiche Farben wie Launcher und Backend-Seiten.</summary>
+    private static async Task RedirectAsync(NetworkStream stream, string location)
+    {
+        var head = Encoding.ASCII.GetBytes(
+            $"HTTP/1.1 303 See Other\r\nLocation: {location}\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n");
+        await stream.WriteAsync(head);
+        await stream.FlushAsync();
+    }
+
+    /// <summary>Gleiche Farben wie Launcher und Website.</summary>
     private static string Page(string title, string text) => $$"""
         <!doctype html>
         <html lang="de">

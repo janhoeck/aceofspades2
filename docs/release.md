@@ -76,7 +76,7 @@ Im Repository: **Settings → Secrets and variables → Actions**.
 | Variable | `R2_BUCKET` | `aos2-updates` |
 | Variable | `UPDATE_BASE_URL` | z. B. `https://updates.deine-domain.de` |
 | Variable | `UNITY_CI_ENABLED` | erst `true` setzen, wenn 2.3 erledigt ist |
-| Variable | `BACKEND_URL` | Adresse des Backends, z. B. `https://api.deine-domain.de` (siehe [backend.md](backend.md#44-github-variablen-und-secrets)) |
+| Variable | `SITE_URL` | Adresse der Website, z. B. `https://aos2.deine-domain.de` (siehe [backend.md](backend.md#45-github-variablen-und-secrets)) |
 
 Secrets sind nach dem Speichern nicht mehr lesbar und erscheinen in Logs als `***`.
 
@@ -149,9 +149,9 @@ Das Skript baut den Unity-Client im Batchmode nach `artifacts/unity-build/`, erz
 ./tools/release/build-game.ps1 -Version 0.1.0
 
 # Launcher aus dem Quellcode starten, mit dem Ordner als Update-Speicher
-# und dem lokalen Backend für die Anmeldung (Backend starten: siehe backend.md, Abschnitt 3)
+# und der lokalen Website für die Anmeldung (Website und Backend starten: siehe backend.md, Abschnitt 3)
 $env:AOS2_UPDATE_URL = "$PWD\artifacts\release"
-$env:AOS2_BACKEND_URL = "http://localhost:5080"
+$env:AOS2_SITE_URL = "http://localhost:3000"
 $env:AOS2_DATA_DIR = "$PWD\artifacts\test-data"   # optional: Einstellungen hierhin statt nach %LocalAppData%\AceOfSpades2
 dotnet run --project launcher/AoS2.Launcher
 ```
@@ -185,7 +185,7 @@ Unity-Build von Hand im Editor: Menü **AoS2 → Windows-Build erstellen** (land
 
 | Problem | Ursache / Lösung |
 |---|---|
-| Launcher: „Kein Anmeldeserver eingestellt“ | Launcher wurde ohne `-BackendUrl` gebaut. Beim Test `AOS2_BACKEND_URL` setzen. Weitere Login-Probleme: [backend.md](backend.md#7-wenn-etwas-schiefgeht). |
+| Launcher: „Kein Anmeldeserver eingestellt“ | Launcher wurde ohne `-SiteUrl` gebaut. Beim Test `AOS2_SITE_URL` setzen. Weitere Login-Probleme: [backend.md](backend.md#7-wenn-etwas-schiefgeht). |
 | Launcher: „Kein Update-Server eingestellt“ | Launcher wurde ohne `-UpdateUrl` gebaut. Beim Test `AOS2_UPDATE_URL` setzen. |
 | Launcher: „Keine Verbindung zum Update-Server“ | URL falsch, Bucket nicht öffentlich oder offline. `<Update-URL>/game/manifest.json` im Browser öffnen. |
 | „Die Prüfsumme stimmt nicht“ | Objekt im Bucket beschädigt oder unvollständig hochgeladen. `upload-game.ps1` erneut ausführen. |

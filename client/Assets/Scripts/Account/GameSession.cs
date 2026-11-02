@@ -5,7 +5,7 @@ using UnityEngine;
 namespace AoS2.Client.Account
 {
     /// <summary>
-    /// Die Anmeldung, mit der das Spiel gestartet wurde. Der Launcher übergibt Sitzungstoken und Backend-Adresse
+    /// Die Anmeldung, mit der das Spiel gestartet wurde. Der Launcher übergibt Sitzungstoken und Website-Adresse
     /// als Umgebungsvariablen (<see cref="LaunchEnvironment"/>), nicht auf der Kommandozeile: Die ist für andere
     /// Programme sichtbar (Task-Manager, Prozesslisten, Absturzberichte).
     /// <para>
@@ -18,16 +18,16 @@ namespace AoS2.Client.Account
         /// <summary>Sitzungstoken für Anfragen an das Backend. <c>null</c>, wenn nicht angemeldet.</summary>
         public static string Token { get; private set; }
 
-        /// <summary>Adresse des Backends ohne „/“ am Ende.</summary>
-        public static string BackendUrl { get; private set; }
+        /// <summary>Adresse der Website ohne „/“ am Ende; die API liegt darunter unter <c>/api</c>.</summary>
+        public static string SiteUrl { get; private set; }
 
-        public static bool IsAvailable => !string.IsNullOrEmpty(Token) && !string.IsNullOrEmpty(BackendUrl);
+        public static bool IsAvailable => !string.IsNullOrEmpty(Token) && !string.IsNullOrEmpty(SiteUrl);
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Load()
         {
             Token = Environment.GetEnvironmentVariable(LaunchEnvironment.SessionToken);
-            BackendUrl = Environment.GetEnvironmentVariable(LaunchEnvironment.BackendUrl)?.TrimEnd('/');
+            SiteUrl = Environment.GetEnvironmentVariable(LaunchEnvironment.SiteUrl)?.TrimEnd('/');
 
 #if !UNITY_EDITOR
             // Das Token nur in diesem Prozess behalten, nicht an Programme vererben, die das Spiel selbst startet.
@@ -41,7 +41,7 @@ namespace AoS2.Client.Account
                 if (saved != null)
                 {
                     Token = saved.Token;
-                    BackendUrl = saved.BackendUrl?.TrimEnd('/');
+                    SiteUrl = saved.SiteUrl?.TrimEnd('/');
                     Debug.Log("Editor: nutze die gespeicherte Anmeldung des Launchers.");
                 }
             }

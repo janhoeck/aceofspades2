@@ -12,6 +12,7 @@ flowchart LR
     end
 
     subgraph Coolify[Coolify - offizielle Infrastruktur]
+        W[Website<br/>Next.js]
         B[Backend-API<br/>ASP.NET Core]
         DB[(PostgreSQL)]
         GS1[Offizielle<br/>Spielserver]
@@ -22,23 +23,27 @@ flowchart LR
     GS2[Community-<br/>Spielserver]
 
     L -- Updates laden --> U
-    L -- Login --> B
+    L -- Login, /api --> W
+    W -- /api, interne Login-API --> B
     B -- OAuth2 --> D
     B --- DB
     L -- startet --> C
-    C -- Serverliste, Join-Ticket --> B
+    C -- /api: Serverliste, Join-Ticket --> W
     C <-- UDP Spiel --> GS1
     C <-- UDP Spiel --> GS2
-    GS1 -- Heartbeat --> B
-    GS2 -- Heartbeat --> B
+    GS1 -- Heartbeat über /api --> W
+    GS2 -- Heartbeat über /api --> W
 ```
+
+Website und Backend teilen sich eine Adresse: Die Website zeigt die Seiten und reicht alles unter `/api` an das Backend durch. Launcher, Spiel und Spielserver brauchen deshalb nur diese eine Adresse.
 
 | Komponente | Technik | Aufgabe |
 |---|---|---|
 | **Launcher** | .NET 10, Avalonia, Velopack | Discord-Login, Spiel installieren/aktualisieren, Spiel starten |
 | **Client** | Unity 6, URP | Darstellung, Eingabe, Sound, UI, Server-Browser, Vorhersage der eigenen Bewegung |
 | **Spielserver** | .NET 10 Konsolenanwendung | Autoritative Spiellogik: Bewegung, Treffer, Blöcke, Punkte |
-| **Backend-API** | ASP.NET Core (.NET 10) + PostgreSQL | Accounts, Discord-Login, Server-Browser (Master-Server), Join-Tickets |
+| **Website** | Next.js 16 (TypeScript) | Startseite, Seiten der Discord-Anmeldung, reicht `/api` an das Backend durch |
+| **Backend-API** | ASP.NET Core (.NET 10) + PostgreSQL | Accounts, Discord-Tausch, Sitzungen, Server-Browser (Master-Server), Join-Tickets |
 | **Shared-Library** | .NET Standard 2.1, C# 9 | Code, den Client **und** Server gemeinsam nutzen |
 | **Update-Speicher** | S3-kompatibler Object Storage | Spieldateien und Update-Manifest |
 
@@ -73,7 +78,7 @@ aceofspades2/
 ├─ maps/                       Map-Quellen und gebaute Maps
 ├─ assets-src/                 Quelldateien der Assets (siehe docs/assets.md)
 ├─ deploy/                     Docker-/Compose-Dateien für Coolify
-├─ web/                        (später) Website
+├─ web/                        Website (Next.js): Startseite, Discord-Login, Durchreichen von /api
 ├─ docs/
 ├─ .github/workflows/
 ├─ Directory.Build.props
@@ -202,27 +207,33 @@ Kampf- und Spawnzonen sind Quader in den Metadaten. Der Server erzwingt:
 sequenceDiagram
     participant L as Launcher
     participant Br as Browser
+    participant W as Website
     participant B as Backend
     participant D as Discord
 
     L->>L: lokalen Port öffnen (127.0.0.1:zufällig)
-    L->>Br: Backend-Login-Seite öffnen
-    Br->>B: /auth/discord/login
-    B->>Br: Weiterleitung zu Discord
+    L->>Br: Login-Seite der Website öffnen (/login)
+    Br->>W: /login
+    W->>B: Anmeldung beginnen (interne API)
+    W->>Br: Weiterleitung zu Discord
     Br->>D: Anmelden & zustimmen (Scope: identify)
     D->>Br: Weiterleitung mit Code
-    Br->>B: /auth/discord/callback?code=…
+    Br->>W: /auth/discord/callback?code=…
+    W->>B: Code weitergeben (interne API)
     B->>D: Code gegen Token tauschen (mit Client-Secret)
     B->>B: Account anlegen/aktualisieren
-    B->>Br: Weiterleitung zu 127.0.0.1:Port mit Einmal-Code
+    B->>W: Adresse des Launchers mit Einmal-Code
+    W->>Br: Weiterleitung zu 127.0.0.1:Port
     Br->>L: Einmal-Code
-    L->>B: Einmal-Code gegen Sitzungstoken tauschen
+    L->>B: Einmal-Code gegen Sitzungstoken tauschen (über /api)
 ```
 
-- Das Discord-Client-Secret liegt **nur im Backend**, nie im Launcher oder Spiel.
+- Die Seiten im Browser zeigt die Website; Konten, Discord-Tausch und Sitzungen bleiben im Backend (seit M2.1, vorher zeigte das Backend die Seiten selbst).
+- Das Discord-Client-Secret liegt **nur im Backend**, nie im Launcher, Spiel oder in der Website.
+- Website und Backend sprechen über eine interne API mit gemeinsamem Schlüssel; die Website reicht sie nicht nach außen durch.
 - Der Einmal-Code ist zusätzlich mit PKCE (`code_challenge`/`code_verifier`) und einem Cookie an Launcher und Browser gebunden.
 - Der Launcher speichert das Sitzungstoken verschlüsselt (Windows DPAPI) und gibt es beim Start als Umgebungsvariable (`AOS2_SESSION_TOKEN`, nicht auf der Kommandozeile) an das Spiel weiter.
-- Ohne Anmeldung kann man nicht spielen. Ist das Backend kurz nicht erreichbar, reicht die gespeicherte Anmeldung.
+- Ohne Anmeldung kann man nicht spielen. Sind Website oder Backend kurz nicht erreichbar, reicht die gespeicherte Anmeldung.
 - Einzelheiten, lokales Testen und Einrichtung: [backend.md](backend.md).
 
 ### Join-Tickets für Spielserver
@@ -231,7 +242,7 @@ Spielserver – auch Community-Server – bekommen **nie** das Sitzungstoken des
 
 1. Der Client fragt beim Backend ein **Join-Ticket** für einen bestimmten Server an.
 2. Das Ticket ist ein kurzlebiges, vom Backend signiertes JWT (Account-ID, Name, Ziel-Server, ca. 60 Sekunden gültig).
-3. Der Spielserver prüft die Signatur mit dem öffentlichen Schlüssel des Backends (`/.well-known/jwks.json`, Code in `libs/AoS2.JoinTickets`).
+3. Der Spielserver prüft die Signatur mit dem öffentlichen Schlüssel des Backends (`/api/.well-known/jwks.json`, Code in `libs/AoS2.JoinTickets`).
 
 So kann ein Community-Server die Identität eines Spielers prüfen, ohne ihm Zugangsdaten anzuvertrauen.
 
@@ -269,20 +280,21 @@ So kann ein Community-Server die Identität eines Spielers prüfen, ohne ihm Zug
 
 | Dienst | Art |
 |---|---|
-| Backend-API | Docker-Container, HTTPS über den Coolify-Proxy |
+| Website | Docker-Container, HTTPS über den Coolify-Proxy, einzige öffentliche Adresse |
+| Backend-API | Docker-Container ohne eigene Domain, nur über die Website erreichbar |
 | PostgreSQL | Coolify-Datenbank |
 | Offizielle Spielserver | Docker-Container mit **direkt freigegebenem UDP-Port** (der Coolify-Proxy leitet nur HTTP weiter) |
 
-Konfiguration als Compose-Dateien in `deploy/`. Nach einem Release stößt die CI das Redeploy über den Coolify-Webhook an. Einrichtung: [backend.md](backend.md#43-coolify).
+Konfiguration als Compose-Dateien in `deploy/`. Nach einem Release stößt die CI das Redeploy über den Coolify-Webhook an. Einrichtung: [backend.md](backend.md#44-coolify).
 
 ## 11. CI/CD (GitHub Actions)
 
 | Auslöser | Schritte |
 |---|---|
-| Pull Request | .NET-Projekte bauen und testen (Shared, Server, Backend, Launcher, Tools) |
+| Pull Request | .NET-Projekte bauen und testen (Shared, Server, Backend, Launcher, Tools); Website: Lint, Tests, Build; beide Docker-Images testweise bauen |
 | Release-Tag | Unity-Client bauen (GameCI) → Manifest erzeugen → in den Update-Speicher hochladen |
 | | Server als Download + Docker-Image veröffentlichen |
 | | Launcher mit Velopack paketieren und veröffentlichen |
-| | Backend-Image nach ghcr.io, Coolify-Redeploy auslösen |
+| | Images von Website und Backend nach ghcr.io, Coolify-Redeploy auslösen |
 
 Für Unity-Builds in GitHub Actions braucht GameCI die Unity-Lizenz als Secret. Bis das eingerichtet ist, kann der Client lokal gebaut und per Skript hochgeladen werden (`tools/release/build-game.ps1`). Workflow: `.github/workflows/release.yml`, Einrichtung: [release.md](release.md).

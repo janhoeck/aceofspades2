@@ -43,11 +43,11 @@ public class LauncherOptionsTests
     }
 
     [Fact]
-    public void Create_BackendUrl_OverrideWins_WithoutTrailingSlash()
+    public void Create_SiteUrl_OverrideWins_WithoutTrailingSlash()
     {
-        Assert.Equal("http://localhost:5080", LauncherOptions.Create(null, null, null, "http://localhost:5080/", "https://api.example.com").BackendUrl);
-        Assert.Equal("https://api.example.com", LauncherOptions.Create(null, null, null, " ", "https://api.example.com").BackendUrl);
-        Assert.Null(LauncherOptions.Create(null, null, null, null, "").BackendUrl);
+        Assert.Equal("http://localhost:5080", LauncherOptions.Create(null, null, null, "http://localhost:5080/", "https://api.example.com").SiteUrl);
+        Assert.Equal("https://api.example.com", LauncherOptions.Create(null, null, null, " ", "https://api.example.com").SiteUrl);
+        Assert.Null(LauncherOptions.Create(null, null, null, null, "").SiteUrl);
     }
 
     [Fact]

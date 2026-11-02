@@ -6,12 +6,12 @@ namespace AoS2.Launcher.Services;
 
 /// <param name="UpdateLocation">Basis des Update-Speichers (URL oder Ordner), <c>null</c> wenn nicht eingestellt.</param>
 /// <param name="DataDirectory">Ordner für Einstellungen, Anmeldung und den vorgeschlagenen Spielordner.</param>
-/// <param name="BackendUrl">Adresse des Backends (Discord-Login), <c>null</c> wenn nicht eingestellt.</param>
-public sealed record LauncherOptions(string? UpdateLocation, string DataDirectory, string? BackendUrl = null)
+/// <param name="SiteUrl">Adresse der Website (Discord-Login, API unter <c>/api</c>), <c>null</c> wenn nicht eingestellt.</param>
+public sealed record LauncherOptions(string? UpdateLocation, string DataDirectory, string? SiteUrl = null)
 {
     public const string UpdateUrlVariable = "AOS2_UPDATE_URL";
     public const string DataDirVariable = SavedSession.DataDirVariable;
-    public const string BackendUrlVariable = LaunchEnvironment.BackendUrl;
+    public const string SiteUrlVariable = LaunchEnvironment.SiteUrl;
 
     /// <summary><c>%LocalAppData%\AceOfSpades2</c></summary>
     public static string DefaultDataDirectory { get; } =
@@ -35,20 +35,20 @@ public sealed record LauncherOptions(string? UpdateLocation, string DataDirector
         Environment.GetEnvironmentVariable(UpdateUrlVariable),
         GetBuiltInValue("AoS2UpdateUrl"),
         Environment.GetEnvironmentVariable(DataDirVariable),
-        Environment.GetEnvironmentVariable(BackendUrlVariable),
-        GetBuiltInValue("AoS2BackendUrl"));
+        Environment.GetEnvironmentVariable(SiteUrlVariable),
+        GetBuiltInValue("AoS2SiteUrl"));
 
     public static LauncherOptions Create(
         string? updateUrlOverride,
         string? builtInUpdateUrl,
         string? dataDirOverride,
-        string? backendUrlOverride = null,
-        string? builtInBackendUrl = null)
+        string? siteUrlOverride = null,
+        string? builtInSiteUrl = null)
     {
         var updateLocation = FirstNonEmpty(updateUrlOverride, builtInUpdateUrl)?.TrimEnd('/', '\\');
         var dataDirectory = FirstNonEmpty(dataDirOverride) ?? DefaultDataDirectory;
-        var backendUrl = FirstNonEmpty(backendUrlOverride, builtInBackendUrl)?.TrimEnd('/');
-        return new LauncherOptions(updateLocation, Path.GetFullPath(dataDirectory), backendUrl);
+        var siteUrl = FirstNonEmpty(siteUrlOverride, builtInSiteUrl)?.TrimEnd('/');
+        return new LauncherOptions(updateLocation, Path.GetFullPath(dataDirectory), siteUrl);
     }
 
     /// <summary>Version aus dem Git-Tag, ohne angehängten Commit-Hash („0.1.0+abc123“ → „0.1.0“).</summary>

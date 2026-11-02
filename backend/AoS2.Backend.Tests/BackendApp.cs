@@ -24,11 +24,16 @@ namespace AoS2.Backend.Tests;
 /// <summary>
 /// Das Backend im Testserver: SQLite statt PostgreSQL, nachgebildetes Discord, steuerbare Uhr.
 /// Umgebung "Production", damit dieselben Prüfungen gelten wie auf dem echten Server.
+/// Die Tests übernehmen die Rolle der Website (interne Login-API mit Schlüssel).
 /// </summary>
 internal sealed class BackendApp : WebApplicationFactory<Program>
 {
-    public const string PublicUrl = "https://api.test";
+    public const string PublicUrl = "https://aos2.test";
+    public const string InternalKey = "test-schluessel-0123456789abcdef0123456789";
     public const int LauncherPort = 50123;
+    public const string LauncherState = "launcher-state-0123456789";
+
+    public static readonly JoinTicketSigningKey SigningKey = JoinTicketSigningKey.Generate();
 
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private readonly Dictionary<string, string?> _settings;
@@ -42,6 +47,7 @@ internal sealed class BackendApp : WebApplicationFactory<Program>
         _settings = new()
         {
             ["Backend:PublicUrl"] = PublicUrl,
+            ["Backend:InternalKey"] = InternalKey,
             ["Backend:MigrateOnStartup"] = "false",
             ["Discord:ClientId"] = "client-id",
             ["Discord:ClientSecret"] = "client-secret",
@@ -51,8 +57,6 @@ internal sealed class BackendApp : WebApplicationFactory<Program>
             _settings[key] = value;
         _connection.Open();
     }
-
-    public static readonly JoinTicketSigningKey SigningKey = JoinTicketSigningKey.Generate();
 
     public FakeDiscord Discord { get; } = new();
     public FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero));
@@ -87,10 +91,6 @@ internal sealed class BackendApp : WebApplicationFactory<Program>
         scope.ServiceProvider.GetRequiredService<BackendDb>().Database.EnsureCreated();
     }
 
-    /// <summary>Ein Browser: folgt keinen Weiterleitungen (die prüfen die Tests selbst), merkt sich Cookies.</summary>
-    public HttpClient CreateBrowser() =>
-        CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true, BaseAddress = new Uri(PublicUrl) });
-
     public T WithDb<T>(Func<BackendDb, T> action)
     {
         using var scope = Services.CreateScope();
@@ -104,9 +104,15 @@ internal sealed class BackendApp : WebApplicationFactory<Program>
             _connection.Dispose();
     }
 
-    // ---------------------------------------------------------------- Anmeldung, wie der Launcher sie macht
+    // ---------------------------------------------------------------- Die Website (interne Login-API)
 
-    public const string LauncherState = "launcher-state-0123456789";
+    public HttpClient CreateWebsite(string? key = InternalKey)
+    {
+        var client = CreateClient();
+        if (key is not null)
+            client.DefaultRequestHeaders.Add(LoginEndpoints.InternalKeyHeader, key);
+        return client;
+    }
 
     /// <summary>PKCE: Der Launcher behält den Verifier und schickt nur die Challenge mit.</summary>
     public static (string Verifier, string Challenge) CreatePkce()
@@ -115,42 +121,34 @@ internal sealed class BackendApp : WebApplicationFactory<Program>
         return (verifier, Base64Url.EncodeToString(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))));
     }
 
-    public static string LoginUrl(string challenge, int port = LauncherPort, string state = LauncherState) =>
-        QueryHelpers.AddQueryString(ApiRoutes.DiscordLogin, new Dictionary<string, string?>
-        {
-            [LoginParameters.Port] = port.ToString(),
-            [LoginParameters.State] = state,
-            [LoginParameters.CodeChallenge] = challenge,
-        });
-
-    /// <summary>Startet die Anmeldung und gibt den <c>state</c> zurück, den das Backend an Discord schickt.</summary>
-    public static async Task<string> StartLoginAsync(HttpClient browser, string challenge)
+    /// <summary>Website ruft <c>/login</c> auf: Anmeldung beginnen.</summary>
+    public async Task<LoginStartResponse> StartLoginAsync(string challenge)
     {
-        using var response = await browser.GetAsync(LoginUrl(challenge));
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        return QueryHelpers.ParseQuery(response.Headers.Location!.Query)["state"].ToString();
+        using var response = await CreateWebsite().PostAsJsonAsync(LoginEndpoints.StartPath, new LoginStartRequest(LauncherPort, LauncherState, challenge));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<LoginStartResponse>())!;
     }
 
-    public static async Task<HttpResponseMessage> DiscordReturnsAsync(HttpClient browser, string state, string code = FakeDiscord.ValidCode) =>
-        await browser.GetAsync($"{ApiRoutes.DiscordCallback}?code={code}&state={state}");
+    /// <summary>Discord ist zurück bei der Website, die Website meldet das dem Backend.</summary>
+    public async Task<HttpResponseMessage> CompleteLoginAsync(string attemptId, string? code = FakeDiscord.ValidCode, string? error = null) =>
+        await CreateWebsite().PostAsJsonAsync(LoginEndpoints.CompletePath, new LoginCompleteRequest(attemptId, code, error));
 
     /// <summary>Kompletter Browser-Teil bis zur Weiterleitung an den Launcher. Gibt den Einmal-Code zurück.</summary>
     public async Task<(string Code, string Verifier)> LoginInBrowserAsync()
     {
-        var browser = CreateBrowser();
         var (verifier, challenge) = CreatePkce();
-        var state = await StartLoginAsync(browser, challenge);
-        using var callback = await DiscordReturnsAsync(browser, state);
-        var query = ParseLoopback(callback);
+        var start = await StartLoginAsync(challenge);
+        using var complete = await CompleteLoginAsync(start.AttemptId);
+        var query = await ParseLoopbackAsync(complete);
         return (query[LoginParameters.Code], verifier);
     }
 
-    /// <summary>Prüft die Weiterleitung an den Launcher und gibt ihre Query zurück.</summary>
-    public static Dictionary<string, string> ParseLoopback(HttpResponseMessage response, int port = LauncherPort)
+    /// <summary>Prüft die Weiterleitungsadresse zum Launcher und gibt ihre Query zurück.</summary>
+    public static async Task<Dictionary<string, string>> ParseLoopbackAsync(HttpResponseMessage response)
     {
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        var location = response.Headers.Location!;
-        Assert.Equal($"http://127.0.0.1:{port}{LoginParameters.LoopbackPath}", location.GetLeftPart(UriPartial.Path));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var location = new Uri((await response.Content.ReadFromJsonAsync<LoginCompleteResponse>())!.RedirectUrl);
+        Assert.Equal($"http://127.0.0.1:{LauncherPort}{LoginParameters.LoopbackPath}", location.GetLeftPart(UriPartial.Path));
         var query = QueryHelpers.ParseQuery(location.Query).ToDictionary(p => p.Key, p => p.Value.ToString());
         Assert.Equal(LauncherState, query[LoginParameters.State]);
         return query;

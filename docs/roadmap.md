@@ -9,6 +9,7 @@ Assets laufen parallel zur Programmierung: Bis M5 reichen Platzhalter, ab M6 wer
 | M0 | Fundament | das Repo baut und testet automatisch auf GitHub |
 | M1 | Launcher & Update-Pipeline | ein frischer PC über den Launcher ein Platzhalter-Spiel installiert, aktualisiert und startet |
 | M2 | Backend & Discord-Login | man sich im Launcher mit Discord anmeldet und das Spiel den Namen anzeigt |
+| M2.1 | Website & Login über die Website | die Discord-Anmeldung des Launchers über die eigene Website läuft und die Website online ist |
 | M3 | Voxel-Welt (lokal) | man über eine texturierte Map läuft, Blöcke abbaut und baut und schwebende Blöcke fallen |
 | M4 | Netzwerk-Grundlage | zwei Spieler auf einem Server flüssig herumlaufen und Blöcke verändern |
 | M5 | Kampf | Spieler sich mit Gewehr, Granate und Rakete bekämpfen, sterben und respawnen |
@@ -38,6 +39,13 @@ Assets laufen parallel zur Programmierung: Bis M5 reichen Platzhalter, ab M6 wer
 - Discord-Anwendung anlegen, OAuth2-Ablauf über das Backend
 - Login im Launcher, Token sicher speichern, an das Spiel übergeben
 - Signierte Join-Tickets (wird ab M4 gebraucht)
+
+## M2.1 – Website & Login über die Website
+- `web/`: Website mit Next.js (App Router, TypeScript) im Design des Launchers: Startseite und alle Seiten der Anmeldung
+- Discord leitet zur Website zurück; die Website gibt den Code serverseitig an das Backend weiter (das Client-Secret bleibt im Backend)
+- Eine Domain für alles: Die Website reicht `/api/*` an das Backend durch, Launcher und Spiel brauchen nur noch eine Adresse
+- Login-Seiten und Browser-Weiterleitungen aus dem Backend entfernen (ersetzt den Weg aus M2)
+- Deployment über Coolify (Website und Backend in einer Compose-Datei), CI baut und testet die Website
 
 ## M3 – Voxel-Welt (lokal)
 - `data/blocks.json`: erste Blocktypen mit Platzhalter-Texturen

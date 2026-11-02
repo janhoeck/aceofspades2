@@ -6,51 +6,57 @@ using Microsoft.AspNetCore.WebUtilities;
 
 namespace AoS2.Backend.Tests;
 
-/// <summary>Der OAuth2-Ablauf aus docs/architecture.md, Abschnitt 6, mit nachgebildetem Discord.</summary>
+/// <summary>Der OAuth2-Ablauf aus docs/backend.md, Abschnitt 2, mit nachgebildeter Website und nachgebildetem Discord.</summary>
 public sealed class LoginFlowTests : IDisposable
 {
+    private const string Challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
     private readonly BackendApp _app = new();
 
     public void Dispose() => _app.Dispose();
 
     [Fact]
-    public async Task Login_RedirectsToDiscord_AndSetsBrowserCookie()
+    public async Task Start_ReturnsDiscordUrl_WithWebsiteCallback()
     {
-        var (_, challenge) = BackendApp.CreatePkce();
+        var start = await _app.StartLoginAsync(Challenge);
 
-        using var response = await _app.CreateBrowser().GetAsync(BackendApp.LoginUrl(challenge));
-
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        var location = response.Headers.Location!;
-        Assert.StartsWith(FakeDiscord.AuthorizeUrl, location.ToString());
-        var query = QueryHelpers.ParseQuery(location.Query).ToDictionary(p => p.Key, p => p.Value.ToString());
-        Assert.Equal($"{BackendApp.PublicUrl}/auth/discord/callback", query["redirect_uri"]);
-        Assert.NotEqual(BackendApp.LauncherState, query["state"]);
-
-        var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"));
-        Assert.StartsWith($"{LoginEndpoints.CookieName}={query["state"]};", cookie);
-        Assert.Contains("httponly", cookie);
-        Assert.Contains("secure", cookie);
-        Assert.Contains("samesite=lax", cookie);
+        Assert.StartsWith(FakeDiscord.AuthorizeUrl, start.AuthorizeUrl);
+        var query = QueryHelpers.ParseQuery(new Uri(start.AuthorizeUrl).Query);
+        Assert.Equal($"{BackendApp.PublicUrl}/auth/discord/callback", query["redirect_uri"].ToString());
+        Assert.Equal(start.AttemptId, query["state"].ToString());
+        Assert.NotEqual(BackendApp.LauncherState, start.AttemptId);
+        Assert.Equal(600, start.MaxAgeSeconds);
     }
 
     [Theory]
-    [InlineData("port=80&state=launcher-state-0123456789&code_challenge=" + Challenge)]
-    [InlineData("port=70000&state=launcher-state-0123456789&code_challenge=" + Challenge)]
-    [InlineData("port=50123&state=kurz&code_challenge=" + Challenge)]
-    [InlineData("port=50123&state=launcher%20state%200123456789&code_challenge=" + Challenge)]
-    [InlineData("port=50123&state=launcher-state-0123456789&code_challenge=zu-kurz")]
-    [InlineData("port=50123&state=launcher-state-0123456789")]
+    [InlineData(null)]
+    [InlineData("falscher-schluessel")]
     [InlineData("")]
-    public async Task Login_RejectsInvalidParameters(string query)
+    public async Task InternalApi_NeedsWebsiteKey(string? key)
     {
-        using var response = await _app.CreateBrowser().GetAsync($"{ApiRoutes.DiscordLogin}?{query}");
+        var website = _app.CreateWebsite(key);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("Ungültige Anmeldung", await response.Content.ReadAsStringAsync());
+        using var start = await website.PostAsJsonAsync(LoginEndpoints.StartPath, new LoginStartRequest(BackendApp.LauncherPort, BackendApp.LauncherState, Challenge));
+        using var complete = await website.PostAsJsonAsync(LoginEndpoints.CompletePath, new LoginCompleteRequest("x", "y", null));
+
+        Assert.Equal(HttpStatusCode.Forbidden, start.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, complete.StatusCode);
+        Assert.Empty(_app.WithDb(db => db.LoginAttempts.ToList()));
     }
 
-    private const string Challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+    [Theory]
+    [InlineData(80, "launcher-state-0123456789", Challenge)]
+    [InlineData(70000, "launcher-state-0123456789", Challenge)]
+    [InlineData(50123, "kurz", Challenge)]
+    [InlineData(50123, "launcher state 0123456789", Challenge)]
+    [InlineData(50123, "launcher-state-0123456789", "zu-kurz")]
+    [InlineData(50123, null, Challenge)]
+    public async Task Start_RejectsInvalidParameters(int port, string? state, string challenge)
+    {
+        using var response = await _app.CreateWebsite().PostAsJsonAsync(LoginEndpoints.StartPath, new LoginStartRequest(port, state!, challenge));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 
     [Fact]
     public async Task FullFlow_CreatesAccount_AndReturnsSession()
@@ -83,79 +89,59 @@ public sealed class LoginFlowTests : IDisposable
     }
 
     [Fact]
-    public async Task Callback_WithoutBrowserCookie_IsRejected()
+    public async Task Complete_UnknownAttempt_IsExpired()
     {
-        var (_, challenge) = BackendApp.CreatePkce();
-        var state = await BackendApp.StartLoginAsync(_app.CreateBrowser(), challenge);
+        using var response = await _app.CompleteLoginAsync("unbekannt");
 
-        // Ein anderer Browser (z. B. ein untergeschobener Link) hat das Cookie nicht.
-        using var response = await BackendApp.DiscordReturnsAsync(_app.CreateBrowser(), state);
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Empty(_app.Discord.Exchanges);
     }
 
     [Fact]
-    public async Task Callback_UnknownState_IsRejected()
+    public async Task Complete_Twice_IsRejected()
     {
-        using var response = await BackendApp.DiscordReturnsAsync(_app.CreateBrowser(), "unbekannt");
+        var start = await _app.StartLoginAsync(Challenge);
+        using var first = await _app.CompleteLoginAsync(start.AttemptId);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("Anmeldung abgelaufen", await response.Content.ReadAsStringAsync());
+        using var second = await _app.CompleteLoginAsync(start.AttemptId);
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, second.StatusCode);
     }
 
     [Fact]
-    public async Task Callback_Twice_IsRejected()
+    public async Task Complete_AfterTenMinutes_IsRejected()
     {
-        var browser = _app.CreateBrowser();
-        var (_, challenge) = BackendApp.CreatePkce();
-        var state = await BackendApp.StartLoginAsync(browser, challenge);
-        using var first = await BackendApp.DiscordReturnsAsync(browser, state);
-
-        using var second = await BackendApp.DiscordReturnsAsync(browser, state);
-
-        Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
-    }
-
-    [Fact]
-    public async Task Callback_AfterTenMinutes_IsRejected()
-    {
-        var browser = _app.CreateBrowser();
-        var (_, challenge) = BackendApp.CreatePkce();
-        var state = await BackendApp.StartLoginAsync(browser, challenge);
+        var start = await _app.StartLoginAsync(Challenge);
 
         _app.Time.Advance(LoginEndpoints.AttemptLifetime + TimeSpan.FromSeconds(1));
-        using var response = await BackendApp.DiscordReturnsAsync(browser, state);
+        using var response = await _app.CompleteLoginAsync(start.AttemptId);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
-    public async Task Callback_UserDenied_TellsLauncher()
+    public async Task Complete_UserDenied_TellsLauncher()
     {
-        var browser = _app.CreateBrowser();
-        var (_, challenge) = BackendApp.CreatePkce();
-        var state = await BackendApp.StartLoginAsync(browser, challenge);
+        var start = await _app.StartLoginAsync(Challenge);
 
-        using var response = await browser.GetAsync($"{ApiRoutes.DiscordCallback}?error=access_denied&state={state}");
+        using var response = await _app.CompleteLoginAsync(start.AttemptId, code: null, error: "access_denied");
 
-        var query = BackendApp.ParseLoopback(response);
+        var query = await BackendApp.ParseLoopbackAsync(response);
         Assert.Equal(LoginErrors.AccessDenied, query[LoginParameters.Error]);
         Assert.False(query.ContainsKey(LoginParameters.Code));
         Assert.Empty(_app.WithDb(db => db.LoginAttempts.ToList()));
     }
 
     [Fact]
-    public async Task Callback_DiscordFails_TellsLauncher()
+    public async Task Complete_DiscordFails_TellsLauncher()
     {
         _app.Discord.Fail = true;
-        var browser = _app.CreateBrowser();
-        var (_, challenge) = BackendApp.CreatePkce();
-        var state = await BackendApp.StartLoginAsync(browser, challenge);
+        var start = await _app.StartLoginAsync(Challenge);
 
-        using var response = await BackendApp.DiscordReturnsAsync(browser, state);
+        using var response = await _app.CompleteLoginAsync(start.AttemptId);
 
-        Assert.Equal(LoginErrors.DiscordFailed, BackendApp.ParseLoopback(response)[LoginParameters.Error]);
+        Assert.Equal(LoginErrors.DiscordFailed, (await BackendApp.ParseLoopbackAsync(response))[LoginParameters.Error]);
         Assert.Empty(_app.WithDb(db => db.Accounts.ToList()));
     }
 

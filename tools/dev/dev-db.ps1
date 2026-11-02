@@ -69,6 +69,7 @@ if (-not $running) {
     New-Item -ItemType Directory -Force (Split-Path $LogFile) | Out-Null
     # Direkt über Process.Start: Mit dem PowerShell-Aufruf (&) oder Start-Process -Wait würde dieses Skript
     # warten, bis die Datenbank wieder beendet ist, weil der Datenbankprozess die Ausgabe erbt.
+    # (Leitet man die Ausgabe des Skripts selbst in eine Pipe um, hält die Datenbank diese Pipe offen.)
     $start = New-Object System.Diagnostics.ProcessStartInfo $pgCtl, "start -D `"$DataDir`" -l `"$LogFile`" -w -o `"-p $Port -c listen_addresses=127.0.0.1`""
     $start.UseShellExecute = $false
     $process = [System.Diagnostics.Process]::Start($start)

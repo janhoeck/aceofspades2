@@ -14,16 +14,26 @@ public sealed class BackendOptions
 {
     public const string Section = "Backend";
 
-    /// <summary>Öffentliche Adresse des Backends ohne „/“ am Ende, z. B. <c>https://api.example.org</c>.</summary>
+    /// <summary>Kürzeste Länge für <see cref="InternalKey"/> außerhalb der Entwicklung.</summary>
+    public const int MinInternalKeyLength = 32;
+
+    /// <summary>
+    /// Öffentliche Adresse der Website ohne „/“ am Ende, z. B. <c>https://aos2.example.org</c>.
+    /// Das Backend selbst ist darunter als <c>/api</c> erreichbar (die Website reicht es durch).
+    /// </summary>
     public string PublicUrl { get; set; } = "";
+
+    /// <summary>
+    /// Gemeinsamer Schlüssel von Website und Backend für <c>/api/internal/…</c>. Die Website schickt ihn
+    /// im Header <c>X-Internal-Key</c>; niemand sonst kennt ihn.
+    /// </summary>
+    public string InternalKey { get; set; } = "";
 
     /// <summary>Spielt beim Start fehlende Migrationen in die Datenbank ein.</summary>
     public bool MigrateOnStartup { get; set; } = true;
 
-    /// <summary>Muss genau so als Redirect in der Discord-App stehen.</summary>
-    public string CallbackUrl => PublicUrl.TrimEnd('/') + ApiRoutes.DiscordCallback;
-
-    public bool IsHttps => PublicUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Seite der Website, zu der Discord zurückleitet. Muss genau so als Redirect in der Discord-App stehen.</summary>
+    public string CallbackUrl => PublicUrl.TrimEnd('/') + SiteRoutes.DiscordCallback;
 }
 
 internal static class RateLimits
@@ -43,6 +53,8 @@ public static class BackendSetup
         services.AddOptions<BackendOptions>().Bind(config.GetSection(BackendOptions.Section))
             .Validate(o => Uri.TryCreate(o.PublicUrl, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https",
                 "Backend:PublicUrl fehlt oder ist keine http(s)-Adresse.")
+            .Validate(o => isDevelopment ? o.InternalKey.Length > 0 : o.InternalKey.Length >= BackendOptions.MinInternalKeyLength,
+                $"Backend:InternalKey fehlt oder ist kürzer als {BackendOptions.MinInternalKeyLength} Zeichen.")
             .ValidateOnStart();
         services.AddOptions<DiscordOptions>().Bind(config.GetSection(DiscordOptions.Section))
             .Validate(o => o.UseDevLogin || (!string.IsNullOrWhiteSpace(o.ClientId) && !string.IsNullOrWhiteSpace(o.ClientSecret)),
@@ -116,7 +128,7 @@ public static class BackendSetup
 
         app.MapGet(ApiRoutes.Health, async (BackendDb db, CancellationToken cancellationToken) =>
             await db.Database.CanConnectAsync(cancellationToken) ? Results.Text("ok") : Results.StatusCode(503));
-        app.MapLogin(app.Services.GetRequiredService<IOptions<DiscordOptions>>().Value.UseDevLogin);
+        app.MapLogin();
         app.MapAccount();
     }
 

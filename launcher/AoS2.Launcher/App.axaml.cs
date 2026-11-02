@@ -40,12 +40,12 @@ public sealed class App : Application
         }
 
         IAccountService? accounts = null;
-        if (options.BackendUrl is not null && OperatingSystem.IsWindows())
+        if (options.SiteUrl is not null && OperatingSystem.IsWindows())
         {
             var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd($"AoS2-Launcher/{launcherVersion}");
             var store = new SessionStore(options.SessionPath, new DpapiProtector());
-            accounts = new AccountService(http, options.BackendUrl, store, platform.OpenUrl);
+            accounts = new AccountService(http, options.SiteUrl, store, platform.OpenUrl);
         }
 
         return new MainWindowViewModel(

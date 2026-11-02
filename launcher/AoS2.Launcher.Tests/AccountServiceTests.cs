@@ -14,7 +14,7 @@ namespace AoS2.Launcher.Tests;
 /// </summary>
 public sealed class AccountServiceTests : IDisposable
 {
-    private const string Backend = "https://api.test";
+    private const string Backend = "https://aos2.test";
 
     private readonly TempDirectory _temp = new();
     private readonly FakeBackend _backend = new();
@@ -28,8 +28,8 @@ public sealed class AccountServiceTests : IDisposable
 
     public void Dispose() => _temp.Dispose();
 
-    private AccountService CreateService(string backendUrl = Backend) =>
-        new(new HttpClient(_backend), backendUrl, _store, OpenBrowser);
+    private AccountService CreateService(string siteUrl = Backend) =>
+        new(new HttpClient(_backend), siteUrl, _store, OpenBrowser);
 
     /// <summary>Der Browser ruft die Login-Seite auf; das Backend (nach Discord) schickt ihn zurück zum Launcher.</summary>
     private void OpenBrowser(string url)
@@ -42,7 +42,7 @@ public sealed class AccountServiceTests : IDisposable
                        $"&state={query[LoginParameters.State]}";
         _ = Task.Run(async () =>
         {
-            using var browser = new HttpClient();
+            using var browser = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
             using var _ = await browser.GetAsync(loopback);
         });
     }
@@ -56,7 +56,7 @@ public sealed class AccountServiceTests : IDisposable
 
         Assert.Equal("Jan", account.DisplayName);
         var url = Assert.Single(_openedUrls);
-        Assert.StartsWith($"{Backend}{ApiRoutes.DiscordLogin}?port=", url);
+        Assert.StartsWith($"{Backend}{SiteRoutes.Login}?port=", url);
         // Der Verifier verlässt den Launcher erst beim Eintauschen und passt zur Challenge.
         Assert.DoesNotContain(_backend.Verifier!, url);
         Assert.True(_backend.VerifierMatched);
@@ -71,12 +71,12 @@ public sealed class AccountServiceTests : IDisposable
 
         var saved = _store.Load();
         Assert.Equal(FakeBackend.Token, saved!.Token);
-        Assert.Equal(Backend, saved.BackendUrl);
+        Assert.Equal(Backend, saved.SiteUrl);
         Assert.Equal("Jan", saved.DisplayName);
         Assert.Equal(new Dictionary<string, string>
         {
             [LaunchEnvironment.SessionToken] = FakeBackend.Token,
-            [LaunchEnvironment.BackendUrl] = Backend,
+            [LaunchEnvironment.SiteUrl] = Backend,
         }, service.GetGameEnvironment());
     }
 

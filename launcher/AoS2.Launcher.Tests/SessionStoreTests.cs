@@ -15,7 +15,7 @@ public sealed class SessionStoreTests : IDisposable
     private static SavedSession Session() => new()
     {
         Token = "aos2_geheim",
-        BackendUrl = "https://api.example.org",
+        SiteUrl = "https://api.example.org",
         AccountId = Guid.NewGuid(),
         DisplayName = "Jan",
     };
@@ -31,7 +31,7 @@ public sealed class SessionStoreTests : IDisposable
 
         Assert.NotNull(loaded);
         Assert.Equal(session.Token, loaded.Token);
-        Assert.Equal(session.BackendUrl, loaded.BackendUrl);
+        Assert.Equal(session.SiteUrl, loaded.SiteUrl);
         Assert.Equal(session.AccountId, loaded.AccountId);
         Assert.Equal(session.DisplayName, loaded.DisplayName);
     }

@@ -78,6 +78,22 @@ public sealed class LoopbackListenerTests : IDisposable
         Assert.Equal("ok", (await wait.WaitAsync(TimeSpan.FromSeconds(10))).Code);
     }
 
+    [Theory]
+    [InlineData("code=abc&state=" + State, "https://aos2.test/login/done")]
+    [InlineData("error=access_denied&state=" + State, "https://aos2.test/login/error?reason=access_denied")]
+    public async Task WithWebsite_RedirectsToItsPages(string query, string expected)
+    {
+        using var listener = new LoopbackListener("https://aos2.test");
+        using var browser = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+        var wait = listener.WaitAsync(State, default);
+
+        using var response = await browser.GetAsync($"http://127.0.0.1:{listener.Port}{LoginParameters.LoopbackPath}?{query}");
+        await wait.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
+        Assert.Equal(expected, response.Headers.Location!.ToString());
+    }
+
     [Fact]
     public async Task Cancel_StopsWaiting()
     {

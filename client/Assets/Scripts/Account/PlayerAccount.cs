@@ -22,7 +22,7 @@ namespace AoS2.Client.Account
     }
 
     /// <summary>
-    /// Fragt beim Start mit dem Sitzungstoken beim Backend nach, wer angemeldet ist (<c>GET /me</c>).
+    /// Fragt beim Start mit dem Sitzungstoken beim Backend nach, wer angemeldet ist (<c>GET /api/me</c>).
     /// Erzeugt sich selbst, braucht also nichts in der Szene.
     /// </summary>
     public sealed class PlayerAccount : MonoBehaviour
@@ -53,7 +53,7 @@ namespace AoS2.Client.Account
                 yield break;
             }
 
-            using (var request = UnityWebRequest.Get(GameSession.BackendUrl + ApiRoutes.Me))
+            using (var request = UnityWebRequest.Get(GameSession.SiteUrl + ApiRoutes.Me))
             {
                 request.SetRequestHeader("Authorization", "Bearer " + GameSession.Token);
                 request.timeout = TimeoutSeconds;
@@ -73,7 +73,7 @@ namespace AoS2.Client.Account
                 else
                 {
                     State = AccountState.Unreachable;
-                    Debug.LogWarning($"Backend nicht erreichbar ({GameSession.BackendUrl}): {request.error}");
+                    Debug.LogWarning($"Backend nicht erreichbar ({GameSession.SiteUrl}): {request.error}");
                 }
             }
         }

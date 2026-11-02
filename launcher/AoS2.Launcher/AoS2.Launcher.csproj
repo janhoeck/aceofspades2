@@ -12,10 +12,10 @@
          Zum Testen geht auch die Umgebungsvariable AOS2_UPDATE_URL (URL oder Ordner). -->
     <AoS2UpdateUrl Condition="'$(AoS2UpdateUrl)' == ''"></AoS2UpdateUrl>
 
-    <!-- Adresse des Backends (Discord-Login), ohne „/“ am Ende. Ebenfalls von der CI gesetzt:
-         dotnet publish -p:AoS2BackendUrl=https://…
-         Zum Testen: Umgebungsvariable AOS2_BACKEND_URL. -->
-    <AoS2BackendUrl Condition="'$(AoS2BackendUrl)' == ''"></AoS2BackendUrl>
+    <!-- Adresse der Website (Discord-Login, API unter /api), ohne „/“ am Ende. Ebenfalls von der CI gesetzt:
+         dotnet publish -p:AoS2SiteUrl=https://…
+         Zum Testen: Umgebungsvariable AOS2_SITE_URL. -->
+    <AoS2SiteUrl Condition="'$(AoS2SiteUrl)' == ''"></AoS2SiteUrl>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,7 +25,7 @@
 
   <ItemGroup>
     <AssemblyMetadata Include="AoS2UpdateUrl" Value="$(AoS2UpdateUrl)" />
-    <AssemblyMetadata Include="AoS2BackendUrl" Value="$(AoS2BackendUrl)" />
+    <AssemblyMetadata Include="AoS2SiteUrl" Value="$(AoS2SiteUrl)" />
     <InternalsVisibleTo Include="AoS2.Launcher.Tests" />
   </ItemGroup>
 

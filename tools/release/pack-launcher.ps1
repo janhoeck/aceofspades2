@@ -12,17 +12,17 @@
     -UpdateUrl wird fest in den Launcher eingebaut: Dort sucht er später Spiel und Launcher-Updates.
     Zum lokalen Testen kann das auch ein Ordner sein, z. B. der volle Pfad zu artifacts/release.
 
-    -BackendUrl ist die Adresse des Backends (Discord-Login), ebenfalls fest eingebaut. Ohne sie zeigt der
-    Launcher "Kein Anmeldeserver eingestellt"; zum Testen hilft dann die Umgebungsvariable AOS2_BACKEND_URL.
+    -SiteUrl ist die Adresse der Website (Discord-Login, API unter /api), ebenfalls fest eingebaut. Ohne sie zeigt der
+    Launcher "Kein Anmeldeserver eingestellt"; zum Testen hilft dann die Umgebungsvariable AOS2_SITE_URL.
 
 .EXAMPLE
-    ./tools/release/pack-launcher.ps1 -Version 0.1.0 -UpdateUrl https://updates.example.com -BackendUrl https://api.example.com -Upload
+    ./tools/release/pack-launcher.ps1 -Version 0.1.0 -UpdateUrl https://updates.example.com -SiteUrl https://aos2.example.com -Upload
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Version,
     [Parameter(Mandatory)][string]$UpdateUrl,
-    [string]$BackendUrl = '',
+    [string]$SiteUrl = '',
     [string]$ReleaseDir,
     [switch]$Upload
 )
@@ -31,8 +31,8 @@ param(
 
 $Version = ConvertTo-ReleaseVersion $Version
 $UpdateUrl = $UpdateUrl.TrimEnd('/', '\')
-$BackendUrl = $BackendUrl.TrimEnd('/')
-if ($Upload -and $BackendUrl -notmatch '^https://') { throw "-Upload braucht eine https-BackendUrl." }
+$SiteUrl = $SiteUrl.TrimEnd('/')
+if ($Upload -and $SiteUrl -notmatch '^https://') { throw "-Upload braucht eine https-SiteUrl." }
 if (-not $ReleaseDir) { $ReleaseDir = $DefaultReleaseDir }
 $launcherDir = Join-Path $ReleaseDir 'launcher'
 $publishDir = Join-Path $RepoRoot 'artifacts/launcher-publish'
@@ -40,12 +40,12 @@ $isHttp = $UpdateUrl -match '^https?://'
 
 if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
 
-Write-Host "Veröffentliche Launcher $Version (Update-Speicher: $UpdateUrl, Backend: $BackendUrl) …"
+Write-Host "Veröffentliche Launcher $Version (Update-Speicher: $UpdateUrl, Website: $SiteUrl) …"
 # Self-contained: Spieler brauchen keine .NET-Installation.
 Invoke-Checked {
     dotnet publish (Join-Path $RepoRoot 'launcher/AoS2.Launcher/AoS2.Launcher.csproj') `
         -c Release -r win-x64 --self-contained -o $publishDir `
-        "-p:Version=$Version" "-p:AoS2UpdateUrl=$UpdateUrl" "-p:AoS2BackendUrl=$BackendUrl"
+        "-p:Version=$Version" "-p:AoS2UpdateUrl=$UpdateUrl" "-p:AoS2SiteUrl=$SiteUrl"
 }
 
 Invoke-Checked { dotnet tool restore }

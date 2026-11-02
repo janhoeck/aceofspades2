@@ -40,16 +40,16 @@ public interface IAccountService
 
     Task SignOutAsync();
 
-    /// <summary>Umgebungsvariablen für den Spielprozess: Sitzungstoken und Backend-Adresse.</summary>
+    /// <summary>Umgebungsvariablen für den Spielprozess: Sitzungstoken und Website-Adresse.</summary>
     IReadOnlyDictionary<string, string> GetGameEnvironment();
 }
 
 /// <summary>
-/// Ablauf (docs/architecture.md, Abschnitt 6): Port auf 127.0.0.1 öffnen → Browser mit der Login-Seite des Backends
-/// → Discord → Backend leitet mit Einmal-Code an den Port weiter → Code + PKCE-Verifier gegen Sitzungstoken tauschen
+/// Ablauf (docs/backend.md, Abschnitt 2): Port auf 127.0.0.1 öffnen → Browser mit der Login-Seite der Website
+/// → Discord → Website leitet mit Einmal-Code an den Port weiter → Code + PKCE-Verifier gegen Sitzungstoken tauschen
 /// → Token verschlüsselt speichern.
 /// </summary>
-public sealed class AccountService(HttpClient http, string backendUrl, SessionStore store, Action<string> openBrowser) : IAccountService
+public sealed class AccountService(HttpClient http, string siteUrl, SessionStore store, Action<string> openBrowser) : IAccountService
 {
     private SavedSession? _session;
     private string? _loginUrl;
@@ -57,7 +57,7 @@ public sealed class AccountService(HttpClient http, string backendUrl, SessionSt
     public async Task<SessionCheck> RestoreAsync(CancellationToken cancellationToken)
     {
         var saved = store.Load();
-        if (saved is null || !string.Equals(saved.BackendUrl, backendUrl, StringComparison.OrdinalIgnoreCase))
+        if (saved is null || !string.Equals(saved.SiteUrl, siteUrl, StringComparison.OrdinalIgnoreCase))
         {
             // Ein Token von einem anderen Backend (z. B. Test-Server) gilt hier nicht.
             store.Delete();
@@ -66,7 +66,7 @@ public sealed class AccountService(HttpClient http, string backendUrl, SessionSt
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, backendUrl + ApiRoutes.Me);
+            using var request = new HttpRequestMessage(HttpMethod.Get, siteUrl + ApiRoutes.Me);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", saved.Token);
             using var response = await http.SendAsync(request, cancellationToken);
 
@@ -107,8 +107,8 @@ public sealed class AccountService(HttpClient http, string backendUrl, SessionSt
         var challenge = Base64Url.EncodeToString(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
         var state = CreateRandom();
 
-        using var listener = new LoopbackListener();
-        _loginUrl = $"{backendUrl}{ApiRoutes.DiscordLogin}?{LoginParameters.Port}={listener.Port}" +
+        using var listener = new LoopbackListener(siteUrl);
+        _loginUrl = $"{siteUrl}{SiteRoutes.Login}?{LoginParameters.Port}={listener.Port}" +
                     $"&{LoginParameters.State}={state}&{LoginParameters.CodeChallenge}={challenge}";
         try
         {
@@ -125,7 +125,7 @@ public sealed class AccountService(HttpClient http, string backendUrl, SessionSt
             _session = new SavedSession
             {
                 Token = session.Token,
-                BackendUrl = backendUrl,
+                SiteUrl = siteUrl,
                 AccountId = session.Account.Id,
                 DisplayName = session.Account.DisplayName,
             };
@@ -155,7 +155,7 @@ public sealed class AccountService(HttpClient http, string backendUrl, SessionSt
         // Sitzung auch im Backend beenden. Klappt das nicht, läuft sie dort eben irgendwann ab.
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, backendUrl + ApiRoutes.Logout);
+            using var request = new HttpRequestMessage(HttpMethod.Post, siteUrl + ApiRoutes.Logout);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             using var _ = await http.SendAsync(request);
         }
@@ -169,7 +169,7 @@ public sealed class AccountService(HttpClient http, string backendUrl, SessionSt
         : new Dictionary<string, string>
         {
             [LaunchEnvironment.SessionToken] = _session.Token,
-            [LaunchEnvironment.BackendUrl] = backendUrl,
+            [LaunchEnvironment.SiteUrl] = siteUrl,
         };
 
     /// <summary>Lieber gleich melden, als den Spieler auf eine Fehlerseite im Browser zu schicken.</summary>
@@ -177,7 +177,7 @@ public sealed class AccountService(HttpClient http, string backendUrl, SessionSt
     {
         try
         {
-            using var response = await http.GetAsync(backendUrl + ApiRoutes.Health, cancellationToken);
+            using var response = await http.GetAsync(siteUrl + ApiRoutes.Health, cancellationToken);
             if (response.IsSuccessStatusCode)
                 return;
         }
@@ -193,7 +193,7 @@ public sealed class AccountService(HttpClient http, string backendUrl, SessionSt
         try
         {
             var request = new SessionRequest { Code = code, CodeVerifier = verifier };
-            using var response = await http.PostAsJsonAsync(backendUrl + ApiRoutes.Session, request, BackendJsonContext.Default.SessionRequest, cancellationToken);
+            using var response = await http.PostAsJsonAsync(siteUrl + ApiRoutes.Session, request, BackendJsonContext.Default.SessionRequest, cancellationToken);
             if (response.IsSuccessStatusCode
                 && await response.Content.ReadFromJsonAsync(BackendJsonContext.Default.SessionResponse, cancellationToken) is { Token.Length: > 0, Account: not null } session)
             {

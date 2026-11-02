@@ -1,6 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
 using AoS2.Backend.Data;
 using AoS2.Contracts;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -8,19 +9,23 @@ using Microsoft.Extensions.Options;
 namespace AoS2.Backend.Auth;
 
 /// <summary>
-/// Discord-Login für den Launcher (Ablauf: docs/architecture.md, Abschnitt 6).
+/// Discord-Login für den Launcher (Ablauf: docs/backend.md, Abschnitt 2). Die Seiten im Browser zeigt die
+/// Website (<c>web/</c>); sie ruft dafür die internen Endpunkte unter <c>/api/internal</c> auf.
 /// <list type="number">
-/// <item>Launcher öffnet im Browser <c>/auth/discord/login?port=…&amp;state=…&amp;code_challenge=…</c>.</item>
-/// <item>Backend merkt sich die Anmeldung, setzt ein Cookie und leitet zu Discord weiter.</item>
-/// <item>Discord leitet zurück auf <c>/auth/discord/callback</c>. Backend holt den Spieler bei Discord,
-///       legt das Konto an und leitet mit einem Einmal-Code zum Launcher (<c>127.0.0.1:port</c>) weiter.</item>
-/// <item>Launcher tauscht Einmal-Code + <c>code_verifier</c> bei <c>/auth/session</c> gegen ein Sitzungstoken.</item>
+/// <item>Launcher öffnet im Browser <c>/login?port=…&amp;state=…&amp;code_challenge=…</c> auf der Website.</item>
+/// <item>Website → <c>POST /api/internal/login/start</c>: Backend merkt sich die Anmeldung und liefert die Discord-Adresse.
+///       Die Website setzt ein Cookie und leitet zu Discord weiter.</item>
+/// <item>Discord leitet zur Website zurück. Website prüft das Cookie → <c>POST /api/internal/login/complete</c>:
+///       Backend tauscht den Code bei Discord (mit Client-Secret), legt das Konto an und liefert die Adresse,
+///       unter der der Launcher (<c>127.0.0.1:port</c>) den Einmal-Code bekommt.</item>
+/// <item>Launcher tauscht Einmal-Code + <c>code_verifier</c> bei <c>/api/auth/session</c> gegen ein Sitzungstoken.</item>
 /// </list>
 /// </summary>
 internal static class LoginEndpoints
 {
-    public const string CookieName = "aos2_login";
-    public const string DevApprovePath = "/dev/discord/approve";
+    public const string InternalKeyHeader = "X-Internal-Key";
+    public const string StartPath = "/api/internal/login/start";
+    public const string CompletePath = "/api/internal/login/complete";
 
     /// <summary>So lange hat man Zeit, sich bei Discord anzumelden.</summary>
     public static readonly TimeSpan AttemptLifetime = TimeSpan.FromMinutes(10);
@@ -28,47 +33,43 @@ internal static class LoginEndpoints
     /// <summary>So lange gilt der Einmal-Code. Der Launcher tauscht ihn sofort ein.</summary>
     public static readonly TimeSpan CodeLifetime = TimeSpan.FromMinutes(2);
 
-    private const string CookiePath = "/auth/discord";
-
-    public static void MapLogin(this IEndpointRouteBuilder app, bool devLogin)
+    public static void MapLogin(this IEndpointRouteBuilder app)
     {
-        app.MapGet(ApiRoutes.DiscordLogin, StartAsync).RequireRateLimiting(RateLimits.Login);
-        app.MapGet(ApiRoutes.DiscordCallback, CallbackAsync).RequireRateLimiting(RateLimits.Login);
+        // Nur für die Website. Ohne den gemeinsamen Schlüssel könnte jemand die Cookie-Prüfung der Website umgehen.
+        var website = app.MapGroup("")
+            .AddEndpointFilter(async (context, next) =>
+                IsWebsite(context.HttpContext) ? await next(context) : Results.StatusCode(StatusCodes.Status403Forbidden))
+            .RequireRateLimiting(RateLimits.Login);
+        website.MapPost(StartPath, StartAsync);
+        website.MapPost(CompletePath, CompleteAsync);
+
         app.MapPost(ApiRoutes.Session, ExchangeAsync).RequireRateLimiting(RateLimits.Login);
         app.MapPost(ApiRoutes.Logout, LogoutAsync).RequireAuthorization();
+    }
 
-        if (devLogin)
-        {
-            app.MapGet(DevDiscordClient.AuthorizePath, (string? state) =>
-                state is null ? Results.BadRequest() : LoginPages.DevAuthorize(state));
-            app.MapGet(DevApprovePath, (string? state, string? name, string? deny, IOptions<BackendOptions> options) =>
-            {
-                var query = deny is not null || string.IsNullOrWhiteSpace(name)
-                    ? new Dictionary<string, string?> { [LoginParameters.Error] = LoginErrors.AccessDenied, ["state"] = state }
-                    : new Dictionary<string, string?> { ["code"] = DevDiscordClient.CreateCode(name.Trim()), ["state"] = state };
-                return Results.Redirect(QueryHelpers.AddQueryString(options.Value.CallbackUrl, query));
-            });
-        }
+    private static bool IsWebsite(HttpContext http)
+    {
+        var expected = http.RequestServices.GetRequiredService<IOptions<BackendOptions>>().Value.InternalKey;
+        string? actual = http.Request.Headers[InternalKeyHeader];
+        return actual is not null
+            && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(actual), Encoding.UTF8.GetBytes(expected));
     }
 
     // ---------------------------------------------------------------- 1. Start
 
     private static async Task<IResult> StartAsync(
-        HttpContext http,
-        int? port,
-        string? state,
-        [FromQuery(Name = LoginParameters.CodeChallenge)] string? codeChallenge,
+        LoginStartRequest request,
         BackendDb db,
         IDiscordClient discord,
         TimeProvider time,
         IOptions<BackendOptions> options,
         CancellationToken cancellationToken)
     {
-        if (port is not (>= 1024 and <= 65535)
-            || !SecretTokens.IsUrlSafe(state, 16, 128)
-            || !SecretTokens.IsUrlSafe(codeChallenge, 43, 43))
+        if (request.Port is < 1024 or > 65535
+            || !SecretTokens.IsUrlSafe(request.State, 16, 128)
+            || !SecretTokens.IsUrlSafe(request.CodeChallenge, 43, 43))
         {
-            return LoginPages.Error(400, "Ungültige Anmeldung", "Dieser Link stammt nicht vom Launcher. Starte die Anmeldung bitte im Launcher.");
+            return Results.Problem(statusCode: 400, title: "Ungültige Anmeldung.");
         }
 
         var now = time.GetUtcNow().UtcDateTime;
@@ -78,35 +79,21 @@ internal static class LoginEndpoints
         var attempt = new LoginAttempt
         {
             Id = SecretTokens.Create(),
-            Port = port.Value,
-            LauncherState = state!,
-            CodeChallenge = codeChallenge!,
+            Port = request.Port,
+            LauncherState = request.State,
+            CodeChallenge = request.CodeChallenge,
             ExpiresAt = now + AttemptLifetime,
         };
         db.LoginAttempts.Add(attempt);
         await db.SaveChangesAsync(cancellationToken);
 
-        // Bindet die Anmeldung an diesen Browser. Ohne das könnte jemand einem Spieler einen fremden
-        // Discord-Rückkehr-Link unterschieben, und der Launcher wäre plötzlich mit dem fremden Konto angemeldet.
-        http.Response.Cookies.Append(CookieName, attempt.Id, new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = options.Value.IsHttps,
-            SameSite = SameSiteMode.Lax,
-            Path = CookiePath,
-            MaxAge = AttemptLifetime,
-        });
-
-        return Results.Redirect(discord.GetAuthorizeUrl(attempt.Id, options.Value.CallbackUrl));
+        return Results.Ok(new LoginStartResponse(attempt.Id, discord.GetAuthorizeUrl(attempt.Id, options.Value.CallbackUrl), (int)AttemptLifetime.TotalSeconds));
     }
 
     // ---------------------------------------------------------------- 2. Rückkehr von Discord
 
-    private static async Task<IResult> CallbackAsync(
-        HttpContext http,
-        string? code,
-        string? state,
-        string? error,
+    private static async Task<IResult> CompleteAsync(
+        LoginCompleteRequest request,
         BackendDb db,
         IDiscordClient discord,
         TimeProvider time,
@@ -115,25 +102,19 @@ internal static class LoginEndpoints
         CancellationToken cancellationToken)
     {
         var now = time.GetUtcNow().UtcDateTime;
-        var attempt = state is null
+        var attempt = string.IsNullOrEmpty(request.AttemptId)
             ? null
-            : await db.LoginAttempts.SingleOrDefaultAsync(a => a.Id == state && a.ExpiresAt > now && a.AccountId == null, cancellationToken);
+            : await db.LoginAttempts.SingleOrDefaultAsync(a => a.Id == request.AttemptId && a.ExpiresAt > now && a.AccountId == null, cancellationToken);
+        if (attempt is null)
+            return Results.Problem(statusCode: 404, title: "Anmeldung abgelaufen.");
 
-        if (attempt is null || http.Request.Cookies[CookieName] != attempt.Id)
-        {
-            return LoginPages.Error(400, "Anmeldung abgelaufen",
-                "Diese Anmeldung ist abgelaufen oder wurde in einem anderen Browser gestartet. Starte sie bitte im Launcher neu.");
-        }
-
-        http.Response.Cookies.Delete(CookieName, new CookieOptions { Path = CookiePath, Secure = options.Value.IsHttps, HttpOnly = true });
-
-        if (error is not null || string.IsNullOrEmpty(code))
+        if (request.Error is not null || string.IsNullOrEmpty(request.Code))
             return await FailAsync(LoginErrors.AccessDenied);
 
         DiscordUser user;
         try
         {
-            var accessToken = await discord.ExchangeCodeAsync(code, options.Value.CallbackUrl, cancellationToken);
+            var accessToken = await discord.ExchangeCodeAsync(request.Code, options.Value.CallbackUrl, cancellationToken);
             user = await discord.GetUserAsync(accessToken, cancellationToken);
         }
         catch (DiscordException ex)
@@ -166,13 +147,13 @@ internal static class LoginEndpoints
         attempt.ExpiresAt = now + CodeLifetime;
         await db.SaveChangesAsync(cancellationToken);
 
-        return Results.Redirect(LoopbackUrl(attempt, LoginParameters.Code, exchangeCode));
+        return Results.Ok(new LoginCompleteResponse(LoopbackUrl(attempt, LoginParameters.Code, exchangeCode)));
 
         async Task<IResult> FailAsync(string reason)
         {
             db.LoginAttempts.Remove(attempt);
             await db.SaveChangesAsync(cancellationToken);
-            return Results.Redirect(LoopbackUrl(attempt, LoginParameters.Error, reason));
+            return Results.Ok(new LoginCompleteResponse(LoopbackUrl(attempt, LoginParameters.Error, reason)));
         }
     }
 
@@ -241,3 +222,17 @@ internal static class LoginEndpoints
         return Results.NoContent();
     }
 }
+
+/// <summary>Website → Backend: Anmeldung des Launchers beginnen.</summary>
+internal sealed record LoginStartRequest(int Port, string State, string CodeChallenge);
+
+/// <param name="AttemptId">Geht als <c>state</c> an Discord; die Website legt ihn zusätzlich als Cookie ab.</param>
+/// <param name="AuthorizeUrl">Discord-Seite „Anwendung autorisieren“ (beim Entwicklungs-Login eine Seite der Website).</param>
+/// <param name="MaxAgeSeconds">So lange gilt die Anmeldung, und so lange soll das Cookie leben.</param>
+internal sealed record LoginStartResponse(string AttemptId, string AuthorizeUrl, int MaxAgeSeconds);
+
+/// <summary>Website → Backend: Discord ist zurück (mit <paramref name="Code"/> oder <paramref name="Error"/>).</summary>
+internal sealed record LoginCompleteRequest(string AttemptId, string? Code, string? Error);
+
+/// <param name="RedirectUrl">Wohin die Website den Browser schickt: zum Launcher auf 127.0.0.1, mit Einmal-Code oder Fehler.</param>
+internal sealed record LoginCompleteResponse(string RedirectUrl);

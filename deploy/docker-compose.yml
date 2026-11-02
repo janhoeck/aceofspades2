@@ -1,20 +1,36 @@
-# Backend auf Coolify (Einrichtung: docs/backend.md).
+# Website und Backend auf Coolify (Einrichtung: docs/backend.md, Abschnitt 4).
 #
+# Öffentlich erreichbar ist nur die Website (Domain in Coolify beim Dienst "web" eintragen, Port 3000).
+# Sie reicht /api/* an das Backend weiter; das Backend selbst bekommt keine Domain.
 # Die Datenbank ist eine eigene PostgreSQL-Ressource in Coolify. Ihre interne Adresse kommt in POSTGRES_CONNECTION.
 # Alle ${…}-Werte trägt man in Coolify unter "Environment Variables" ein; Coolify zeigt sie dort automatisch an.
-# Die Domain (z. B. https://api.deine-domain.de) stellt man in Coolify beim Dienst "backend" ein, Port 8080.
 
 services:
+  web:
+    image: ghcr.io/janhoeck/aos2-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      # Öffentliche Adresse, genau wie in Coolify eingestellt, ohne "/" am Ende.
+      SITE_URL: ${SITE_URL:?SITE_URL fehlt}
+      BACKEND_INTERNAL_URL: http://backend:8080
+      BACKEND_INTERNAL_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY fehlt}
+    depends_on:
+      backend:
+        condition: service_healthy
+
   backend:
-    image: ghcr.io/janhoeck/aos2-backend:${BACKEND_TAG:-latest}
+    image: ghcr.io/janhoeck/aos2-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     expose:
       - "8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      # Öffentliche Adresse, genau wie in Coolify eingestellt, ohne "/" am Ende.
-      Backend__PublicUrl: ${BACKEND_PUBLIC_URL:?BACKEND_PUBLIC_URL fehlt}
-      # z. B. Host=<interner Name der Coolify-Datenbank>;Port=5432;Database=aos2;Username=aos2;Password=…
+      Backend__PublicUrl: ${SITE_URL:?SITE_URL fehlt}
+      # Gemeinsamer Schlüssel mit der Website, mindestens 32 Zeichen (Erzeugen: siehe docs/backend.md).
+      Backend__InternalKey: ${INTERNAL_API_KEY:?INTERNAL_API_KEY fehlt}
+      # z. B. postgres://aos2:…@<interner Name der Coolify-Datenbank>:5432/aos2
       ConnectionStrings__Postgres: ${POSTGRES_CONNECTION:?POSTGRES_CONNECTION fehlt}
       Discord__ClientId: ${DISCORD_CLIENT_ID:?DISCORD_CLIENT_ID fehlt}
       Discord__ClientSecret: ${DISCORD_CLIENT_SECRET:?DISCORD_CLIENT_SECRET fehlt}
