@@ -1,0 +1,28 @@
+# Backend auf Coolify (Einrichtung: docs/backend.md).
+#
+# Die Datenbank ist eine eigene PostgreSQL-Ressource in Coolify. Ihre interne Adresse kommt in POSTGRES_CONNECTION.
+# Alle ${…}-Werte trägt man in Coolify unter "Environment Variables" ein; Coolify zeigt sie dort automatisch an.
+# Die Domain (z. B. https://api.deine-domain.de) stellt man in Coolify beim Dienst "backend" ein, Port 8080.
+
+services:
+  backend:
+    image: ghcr.io/janhoeck/aos2-backend:${BACKEND_TAG:-latest}
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Öffentliche Adresse, genau wie in Coolify eingestellt, ohne "/" am Ende.
+      Backend__PublicUrl: ${BACKEND_PUBLIC_URL:?BACKEND_PUBLIC_URL fehlt}
+      # z. B. Host=<interner Name der Coolify-Datenbank>;Port=5432;Database=aos2;Username=aos2;Password=…
+      ConnectionStrings__Postgres: ${POSTGRES_CONNECTION:?POSTGRES_CONNECTION fehlt}
+      Discord__ClientId: ${DISCORD_CLIENT_ID:?DISCORD_CLIENT_ID fehlt}
+      Discord__ClientSecret: ${DISCORD_CLIENT_SECRET:?DISCORD_CLIENT_SECRET fehlt}
+      # Einmal erzeugen: docker run --rm ghcr.io/janhoeck/aos2-backend generate-signing-key
+      JoinTickets__SigningKey: ${JOIN_TICKET_SIGNING_KEY:?JOIN_TICKET_SIGNING_KEY fehlt}
+    healthcheck:
+      test: ["CMD", "dotnet", "AoS2.Backend.dll", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3

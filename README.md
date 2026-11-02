@@ -11,6 +11,7 @@ Ein Team-Shooter (Blau gegen Grün) in einer vollständig zerstörbaren, blockar
 - [Assets](docs/assets.md) – Stil, Herstellung und Liste aller Grafiken, Modelle und Sounds
 - [Roadmap](docs/roadmap.md) – Meilensteine
 - [Releases und Updates](docs/release.md) – Launcher, Update-Speicher (Cloudflare R2), Release-Workflow
+- [Backend und Discord-Login](docs/backend.md) – Anmeldung, lokales Backend, Discord-App, Coolify
 
 ## Aufbau des Repositories
 
@@ -44,10 +45,13 @@ dotnet test AoS2.slnx
 
 Alle Build-Ausgaben landen in `artifacts/`. Den Unity-Client öffnet man über Unity Hub → *Add* → Ordner `client/`.
 
-Launcher und Spiel lokal ausprobieren, ohne Server (Details in [docs/release.md](docs/release.md#5-ohne-r2-lokal-testen)):
+Launcher und Spiel lokal ausprobieren, mit lokalem Backend und Entwicklungs-Login statt Discord (Details in [docs/backend.md](docs/backend.md#3-lokal-entwickeln) und [docs/release.md](docs/release.md#5-ohne-r2-lokal-testen)):
 
 ```powershell
+./tools/dev/dev-db.ps1                       # Datenbank (PostgreSQL muss installiert sein)
+dotnet run --project backend/AoS2.Backend    # Backend auf http://localhost:5080, in einem eigenen Terminal
 ./tools/release/build-game.ps1 -Version 0.1.0
 $env:AOS2_UPDATE_URL = "$PWD\artifacts\release"
+$env:AOS2_BACKEND_URL = "http://localhost:5080"
 dotnet run --project launcher/AoS2.Launcher
 ```

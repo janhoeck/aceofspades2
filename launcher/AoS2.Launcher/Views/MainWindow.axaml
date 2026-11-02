@@ -59,11 +59,24 @@
 
       <!-- Titelleiste (Windows-Rahmen ist ausgeblendet). Ziehen verschiebt das Fenster. -->
       <Grid Name="TitleBar" DockPanel.Dock="Top" Height="32" Background="{StaticResource TitleBar}"
-            ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+            ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
         <Path Margin="12,0,8,0" Width="14" Height="14" Stretch="Uniform" Fill="{StaticResource Gold}" VerticalAlignment="Center"
               Data="M12 2C9 6 4 9 4 13.5A4 4 0 0 0 11 16l-1.5 5h5L13 16a4 4 0 0 0 7-2.5C20 9 15 6 12 2z" />
         <TextBlock Grid.Column="1" Text="Ace of Spades 2" FontSize="12" Foreground="{StaticResource Hint}" VerticalAlignment="Center" />
-        <Button Grid.Column="2" Theme="{StaticResource TitleBarButton}" Classes.active="{Binding IsSettingsOpen}"
+
+        <!-- Angemeldeter Spieler. Klick öffnet die Einstellungen (dort: Abmelden). -->
+        <Button Grid.Column="2" Theme="{StaticResource TitleBarButton}" Width="NaN" IsVisible="{Binding IsSignedIn}"
+                Command="{Binding OpenSettingsCommand}" ToolTip.Tip="Konto" AutomationProperties.Name="Konto">
+          <StackPanel Orientation="Horizontal" Spacing="8" Margin="10,0">
+            <Border Width="18" Height="18" Background="{StaticResource Gold}" BorderBrush="{StaticResource GoldEdge}" BorderThickness="0,0,0,2">
+              <TextBlock Text="{Binding AccountInitial}" FontFamily="{StaticResource DisplayFont}" FontSize="11"
+                         Foreground="{StaticResource OnGold}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <TextBlock Text="{Binding AccountName}" FontSize="13" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+
+        <Button Grid.Column="3" Theme="{StaticResource TitleBarButton}" Classes.active="{Binding IsSettingsOpen}"
                 Command="{Binding OpenSettingsCommand}" ToolTip.Tip="Einstellungen" AutomationProperties.Name="Einstellungen">
           <Viewbox Width="16" Height="16">
             <Canvas Width="24" Height="24">
@@ -74,10 +87,10 @@
             </Canvas>
           </Viewbox>
         </Button>
-        <Button Grid.Column="3" Theme="{StaticResource TitleBarButton}" Click="OnMinimizeClick" AutomationProperties.Name="Minimieren">
+        <Button Grid.Column="4" Theme="{StaticResource TitleBarButton}" Click="OnMinimizeClick" AutomationProperties.Name="Minimieren">
           <Path Width="12" Height="12" Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.5" Data="M1 6h10" />
         </Button>
-        <Button Grid.Column="4" Theme="{StaticResource TitleBarButton}" Classes="close" Click="OnCloseClick" AutomationProperties.Name="Schließen">
+        <Button Grid.Column="5" Theme="{StaticResource TitleBarButton}" Classes="close" Click="OnCloseClick" AutomationProperties.Name="Schließen">
           <Path Width="12" Height="12" Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.5" Data="M1 1l10 10M11 1L1 11" />
         </Button>
       </Grid>
@@ -102,6 +115,44 @@
       <!-- Unterer Bereich: je nach Zustand ein anderer Inhalt -->
       <Border Classes="bottom" Classes.problem="{Binding HasProblem}" BorderThickness="0,4,0,0" Padding="40,24,40,26">
         <Panel>
+
+          <!-- Nicht angemeldet: mit Discord anmelden -->
+          <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center" IsVisible="{Binding IsSignInScreen}">
+            <StackPanel Spacing="6" VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Border Width="12" Height="12" Background="{StaticResource Gold}" BorderBrush="{StaticResource GoldEdge}" BorderThickness="0,0,2,2" VerticalAlignment="Center" />
+                <TextBlock Classes="status" Text="{Binding StatusText}" />
+              </StackPanel>
+              <TextBlock Classes="detail" Text="{Binding DetailText}" />
+              <TextBlock Classes="hint warning" Text="{Binding HintText}" IsVisible="{Binding HintText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </StackPanel>
+            <Button Grid.Column="1" Theme="{StaticResource BlockButton}" Classes="primary" Height="64" Padding="28,0" Margin="32,0,0,0"
+                    VerticalAlignment="Center" Command="{Binding SignInCommand}" IsDefault="True"
+                    AutomationProperties.Name="Mit Discord anmelden">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <Path Data="{StaticResource DiscordLogo}" Fill="{StaticResource OnGold}" Width="26" Height="20" Stretch="Uniform" VerticalAlignment="Center" />
+                <TextBlock Text="Mit Discord anmelden" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+          </Grid>
+
+          <!-- Anmeldung läuft im Browser -->
+          <StackPanel Spacing="16" VerticalAlignment="Center" IsVisible="{Binding IsSigningIn}">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+              <StackPanel Spacing="6" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <Path Data="{StaticResource DiscordLogo}" Fill="{StaticResource Gold}" Width="22" Height="17" Stretch="Uniform" VerticalAlignment="Center" />
+                  <TextBlock Classes="status" Text="{Binding StatusText}" />
+                </StackPanel>
+                <TextBlock Classes="detail" Text="{Binding DetailText}" />
+              </StackPanel>
+              <Button Grid.Column="1" Theme="{StaticResource BlockButton}" Classes="small" Margin="24,0,0,0" VerticalAlignment="Center"
+                      Content="Browser erneut öffnen" Command="{Binding ReopenBrowserCommand}" />
+              <Button Grid.Column="2" Theme="{StaticResource BlockButton}" Classes="small" Margin="10,0,0,0" VerticalAlignment="Center"
+                      Content="Abbrechen" Command="{Binding CancelSignInCommand}" />
+            </Grid>
+            <c:BlockProgressBar Height="12" Segments="30" IsIndeterminate="True" />
+          </StackPanel>
 
           <!-- Erster Start: Ordner wählen -->
           <StackPanel Spacing="12" VerticalAlignment="Center" IsVisible="{Binding IsChoosingLocation}">
@@ -195,6 +246,22 @@
                         Command="{Binding CloseSettingsCommand}" AutomationProperties.Name="Einstellungen schließen">
                   <Path Width="14" Height="14" Stretch="Uniform" Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.5" Data="M1 1l10 10M11 1L1 11" />
                 </Button>
+              </Grid>
+            </Border>
+
+            <Border Classes="section" Padding="24,16" IsVisible="{Binding IsSignedIn}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <Border Width="40" Height="40" Background="{StaticResource Gold}" BorderBrush="{StaticResource GoldEdge}" BorderThickness="0,0,0,3">
+                  <TextBlock Text="{Binding AccountInitial}" FontFamily="{StaticResource DisplayFont}" FontSize="20"
+                             Foreground="{StaticResource OnGold}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="1" Margin="14,0" Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding AccountName}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Classes="hint" Text="Angemeldet mit Discord" IsVisible="{Binding !IsAccountOffline}" />
+                  <TextBlock Classes="hint warning" Text="Anmeldeserver nicht erreichbar, Anmeldung nicht geprüft" IsVisible="{Binding IsAccountOffline}" />
+                </StackPanel>
+                <Button Grid.Column="2" Theme="{StaticResource BlockButton}" Classes="small" VerticalAlignment="Center"
+                        Content="Abmelden" Command="{Binding SignOutCommand}" />
               </Grid>
             </Border>
 

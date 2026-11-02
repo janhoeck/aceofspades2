@@ -61,7 +61,9 @@ aceofspades2/
 │  ├─ AoS2.Shared.Tests/
 │  ├─ AoS2.Updates/            Update-Manifest, Dateivergleich, Download (Launcher + ManifestBuilder)
 │  ├─ AoS2.Updates.Tests/
-│  └─ AoS2.Contracts/          Datenformate der Backend-API (DTOs)
+│  ├─ AoS2.Contracts/          Datenformate der Backend-API (DTOs), auch als Unity-Package
+│  ├─ AoS2.JoinTickets/        Join-Tickets ausstellen (Backend) und prüfen (Spielserver)
+│  └─ AoS2.JoinTickets.Tests/
 ├─ tools/
 │  ├─ AoS2.MapConverter/       MagicaVoxel (.vox) → .aos2map
 │  ├─ AoS2.ManifestBuilder/    Erzeugt das Update-Manifest
@@ -218,7 +220,10 @@ sequenceDiagram
 ```
 
 - Das Discord-Client-Secret liegt **nur im Backend**, nie im Launcher oder Spiel.
-- Der Launcher speichert das Sitzungstoken verschlüsselt (Windows DPAPI) und gibt es beim Start an das Spiel weiter.
+- Der Einmal-Code ist zusätzlich mit PKCE (`code_challenge`/`code_verifier`) und einem Cookie an Launcher und Browser gebunden.
+- Der Launcher speichert das Sitzungstoken verschlüsselt (Windows DPAPI) und gibt es beim Start als Umgebungsvariable (`AOS2_SESSION_TOKEN`, nicht auf der Kommandozeile) an das Spiel weiter.
+- Ohne Anmeldung kann man nicht spielen. Ist das Backend kurz nicht erreichbar, reicht die gespeicherte Anmeldung.
+- Einzelheiten, lokales Testen und Einrichtung: [backend.md](backend.md).
 
 ### Join-Tickets für Spielserver
 
@@ -226,7 +231,7 @@ Spielserver – auch Community-Server – bekommen **nie** das Sitzungstoken des
 
 1. Der Client fragt beim Backend ein **Join-Ticket** für einen bestimmten Server an.
 2. Das Ticket ist ein kurzlebiges, vom Backend signiertes JWT (Account-ID, Name, Ziel-Server, ca. 60 Sekunden gültig).
-3. Der Spielserver prüft die Signatur mit dem öffentlichen Schlüssel des Backends.
+3. Der Spielserver prüft die Signatur mit dem öffentlichen Schlüssel des Backends (`/.well-known/jwks.json`, Code in `libs/AoS2.JoinTickets`).
 
 So kann ein Community-Server die Identität eines Spielers prüfen, ohne ihm Zugangsdaten anzuvertrauen.
 
@@ -268,7 +273,7 @@ So kann ein Community-Server die Identität eines Spielers prüfen, ohne ihm Zug
 | PostgreSQL | Coolify-Datenbank |
 | Offizielle Spielserver | Docker-Container mit **direkt freigegebenem UDP-Port** (der Coolify-Proxy leitet nur HTTP weiter) |
 
-Konfiguration als Compose-Dateien in `deploy/`. Nach einem Release stößt die CI das Redeploy über den Coolify-Webhook an.
+Konfiguration als Compose-Dateien in `deploy/`. Nach einem Release stößt die CI das Redeploy über den Coolify-Webhook an. Einrichtung: [backend.md](backend.md#43-coolify).
 
 ## 11. CI/CD (GitHub Actions)
 
@@ -278,6 +283,6 @@ Konfiguration als Compose-Dateien in `deploy/`. Nach einem Release stößt die C
 | Release-Tag | Unity-Client bauen (GameCI) → Manifest erzeugen → in den Update-Speicher hochladen |
 | | Server als Download + Docker-Image veröffentlichen |
 | | Launcher mit Velopack paketieren und veröffentlichen |
-| | Coolify-Redeploy auslösen |
+| | Backend-Image nach ghcr.io, Coolify-Redeploy auslösen |
 
 Für Unity-Builds in GitHub Actions braucht GameCI die Unity-Lizenz als Secret. Bis das eingerichtet ist, kann der Client lokal gebaut und per Skript hochgeladen werden (`tools/release/build-game.ps1`). Workflow: `.github/workflows/release.yml`, Einrichtung: [release.md](release.md).

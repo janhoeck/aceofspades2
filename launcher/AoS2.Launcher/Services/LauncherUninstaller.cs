@@ -19,6 +19,7 @@ public static class LauncherUninstaller
 
             Installation.RemoveAsync(gameDirectory).GetAwaiter().GetResult();
             store.Delete();
+            File.Delete(options.SessionPath);
             Installation.DeleteEmptyDirectories(options.DataDirectory, includeRoot: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

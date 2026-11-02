@@ -15,6 +15,9 @@ public interface IPlatformServices
 
     /// <summary>Freier Platz auf dem Laufwerk des Pfads, <c>null</c> wenn unbekannt.</summary>
     long? GetAvailableBytes(string path);
+
+    /// <summary>Öffnet eine Webseite im Standardbrowser.</summary>
+    void OpenUrl(string url);
 }
 
 public sealed class DesktopPlatformServices(Func<TopLevel?> topLevel) : IPlatformServices
@@ -51,6 +54,11 @@ public sealed class DesktopPlatformServices(Func<TopLevel?> topLevel) : IPlatfor
         {
             return null;
         }
+    }
+
+    public void OpenUrl(string url)
+    {
+        using var _ = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
     /// <summary>Der gewählte Spielordner gibt es vor der Installation oft noch nicht.</summary>

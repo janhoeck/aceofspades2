@@ -1,3 +1,4 @@
+using AoS2.Client.Account;
 using AoS2.Shared;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -5,8 +6,8 @@ using UnityEngine.InputSystem;
 namespace AoS2.Client
 {
     /// <summary>
-    /// Platzhalter für M1: zeigt Spiel- und Protokollversion, damit man sieht, welche Version
-    /// der Launcher installiert hat. Erzeugt sich beim Start selbst, braucht also nichts in der Szene.
+    /// Platzhalter: zeigt Spiel- und Protokollversion (welche Version hat der Launcher installiert?)
+    /// und den angemeldeten Spieler. Erzeugt sich beim Start selbst, braucht also nichts in der Szene.
     /// </summary>
     public sealed class VersionDisplay : MonoBehaviour
     {
@@ -40,7 +41,7 @@ namespace AoS2.Client
             }
 
             // Dunkler Streifen hinter dem Text, sonst ist Weiß auf dem hellen Himmel kaum lesbar.
-            GUI.DrawTexture(new Rect(0, Screen.height / 2f - 110, Screen.width, 210), _panel);
+            GUI.DrawTexture(new Rect(0, Screen.height / 2f - 110, Screen.width, 250), _panel);
 
             var center = new Rect(0, Screen.height / 2f - 90, Screen.width, 60);
             GUI.Label(center, "ACE OF SPADES 2", _titleStyle);
@@ -49,7 +50,22 @@ namespace AoS2.Client
             GUI.Label(center, $"Version {Application.version}   ·   Protokoll {ProtocolInfo.Version}", _textStyle);
 
             center.y += 40;
+            GUI.Label(center, AccountText(), _textStyle);
+
+            center.y += 40;
             GUI.Label(center, "Platzhalter – ESC beendet das Spiel", _textStyle);
+        }
+
+        private static string AccountText()
+        {
+            switch (PlayerAccount.State)
+            {
+                case AccountState.SignedIn: return $"Angemeldet als {PlayerAccount.Account.DisplayName}";
+                case AccountState.NotSignedIn: return "Nicht angemeldet – bitte über den Launcher starten";
+                case AccountState.Expired: return "Anmeldung abgelaufen – bitte im Launcher neu anmelden";
+                case AccountState.Unreachable: return "Anmeldeserver nicht erreichbar";
+                default: return "Prüfe Anmeldung …";
+            }
         }
     }
 }

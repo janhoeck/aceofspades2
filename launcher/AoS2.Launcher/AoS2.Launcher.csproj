@@ -11,6 +11,11 @@
          dotnet publish -p:AoS2UpdateUrl=https://…
          Zum Testen geht auch die Umgebungsvariable AOS2_UPDATE_URL (URL oder Ordner). -->
     <AoS2UpdateUrl Condition="'$(AoS2UpdateUrl)' == ''"></AoS2UpdateUrl>
+
+    <!-- Adresse des Backends (Discord-Login), ohne „/“ am Ende. Ebenfalls von der CI gesetzt:
+         dotnet publish -p:AoS2BackendUrl=https://…
+         Zum Testen: Umgebungsvariable AOS2_BACKEND_URL. -->
+    <AoS2BackendUrl Condition="'$(AoS2BackendUrl)' == ''"></AoS2BackendUrl>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +25,7 @@
 
   <ItemGroup>
     <AssemblyMetadata Include="AoS2UpdateUrl" Value="$(AoS2UpdateUrl)" />
+    <AssemblyMetadata Include="AoS2BackendUrl" Value="$(AoS2BackendUrl)" />
     <InternalsVisibleTo Include="AoS2.Launcher.Tests" />
   </ItemGroup>
 
@@ -29,10 +35,12 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.5" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
     <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\libs\AoS2.Contracts\AoS2.Contracts.csproj" />
     <ProjectReference Include="..\..\libs\AoS2.Updates\AoS2.Updates.csproj" />
   </ItemGroup>
 

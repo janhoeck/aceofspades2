@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Join-Tickets: Das Backend stellt sie aus, Spielserver (ab M4) prüfen sie. -->
+
+  <PropertyGroup>
+    <RootNamespace>AoS2.JoinTickets</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AoS2.JoinTickets.Tests" />
+  </ItemGroup>
+
+</Project>

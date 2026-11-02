@@ -52,4 +52,5 @@ public sealed class LauncherSettingsStore(string path)
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(LauncherSettings))]
+[JsonSerializable(typeof(AoS2.Contracts.SavedSession))]
 internal sealed partial class LauncherJsonContext : JsonSerializerContext;

@@ -1,41 +1,54 @@
 using System.Reflection;
+using AoS2.Contracts;
 using AoS2.Updates;
 
 namespace AoS2.Launcher.Services;
 
 /// <param name="UpdateLocation">Basis des Update-Speichers (URL oder Ordner), <c>null</c> wenn nicht eingestellt.</param>
-/// <param name="DataDirectory">Ordner für Einstellungen und den vorgeschlagenen Spielordner.</param>
-public sealed record LauncherOptions(string? UpdateLocation, string DataDirectory)
+/// <param name="DataDirectory">Ordner für Einstellungen, Anmeldung und den vorgeschlagenen Spielordner.</param>
+/// <param name="BackendUrl">Adresse des Backends (Discord-Login), <c>null</c> wenn nicht eingestellt.</param>
+public sealed record LauncherOptions(string? UpdateLocation, string DataDirectory, string? BackendUrl = null)
 {
     public const string UpdateUrlVariable = "AOS2_UPDATE_URL";
-    public const string DataDirVariable = "AOS2_DATA_DIR";
+    public const string DataDirVariable = SavedSession.DataDirVariable;
+    public const string BackendUrlVariable = LaunchEnvironment.BackendUrl;
 
     /// <summary><c>%LocalAppData%\AceOfSpades2</c></summary>
     public static string DefaultDataDirectory { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AceOfSpades2");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), SavedSession.DataFolderName);
 
     /// <summary>Vorschlag beim ersten Start: <c>%LocalAppData%\AceOfSpades2\Game</c>.</summary>
     public string DefaultGameDirectory => Path.Combine(DataDirectory, "Game");
 
     public string SettingsPath => Path.Combine(DataDirectory, "launcher.json");
 
+    /// <summary>Gespeicherte Anmeldung (verschlüsselt).</summary>
+    public string SessionPath => Path.Combine(DataDirectory, SavedSession.FileName);
+
     /// <summary>Velopack-Pakete des Launchers liegen im Unterordner <c>launcher</c>.</summary>
     public string? LauncherUpdateLocation => UpdateLocation is null ? null : Combine(UpdateLocation, UpdateLayout.LauncherFolder);
 
     /// <summary>
-    /// Umgebungsvariablen haben Vorrang (zum Testen), sonst gilt die beim Bauen eingetragene URL.
+    /// Umgebungsvariablen haben Vorrang (zum Testen), sonst gelten die beim Bauen eingetragenen Adressen.
     /// </summary>
     public static LauncherOptions FromEnvironment() => Create(
         Environment.GetEnvironmentVariable(UpdateUrlVariable),
-        typeof(LauncherOptions).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
-            .FirstOrDefault(a => a.Key == "AoS2UpdateUrl")?.Value,
-        Environment.GetEnvironmentVariable(DataDirVariable));
+        GetBuiltInValue("AoS2UpdateUrl"),
+        Environment.GetEnvironmentVariable(DataDirVariable),
+        Environment.GetEnvironmentVariable(BackendUrlVariable),
+        GetBuiltInValue("AoS2BackendUrl"));
 
-    public static LauncherOptions Create(string? updateUrlOverride, string? builtInUpdateUrl, string? dataDirOverride)
+    public static LauncherOptions Create(
+        string? updateUrlOverride,
+        string? builtInUpdateUrl,
+        string? dataDirOverride,
+        string? backendUrlOverride = null,
+        string? builtInBackendUrl = null)
     {
         var updateLocation = FirstNonEmpty(updateUrlOverride, builtInUpdateUrl)?.TrimEnd('/', '\\');
         var dataDirectory = FirstNonEmpty(dataDirOverride) ?? DefaultDataDirectory;
-        return new LauncherOptions(updateLocation, Path.GetFullPath(dataDirectory));
+        var backendUrl = FirstNonEmpty(backendUrlOverride, builtInBackendUrl)?.TrimEnd('/');
+        return new LauncherOptions(updateLocation, Path.GetFullPath(dataDirectory), backendUrl);
     }
 
     /// <summary>Version aus dem Git-Tag, ohne angehängten Commit-Hash („0.1.0+abc123“ → „0.1.0“).</summary>
@@ -48,6 +61,9 @@ public sealed record LauncherOptions(string? UpdateLocation, string DataDirector
 
     internal static bool IsHttp(string location) =>
         location.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || location.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
+    private static string? GetBuiltInValue(string key) =>
+        typeof(LauncherOptions).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == key)?.Value;
 
     private static string Combine(string location, string child) =>
         IsHttp(location) ? $"{location}/{child}" : Path.Combine(location, child);

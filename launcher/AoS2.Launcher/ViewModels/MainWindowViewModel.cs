@@ -12,6 +12,12 @@ public enum LauncherScreen
     /// <summary>Prüfen, Laden, Verschieben: mit Fortschrittsbalken.</summary>
     Working,
 
+    /// <summary>Nicht angemeldet: „Mit Discord anmelden“.</summary>
+    SignIn,
+
+    /// <summary>Browser ist offen, der Launcher wartet auf die Rückkehr von Discord.</summary>
+    SigningIn,
+
     /// <summary>Erster Start: Spielordner wählen.</summary>
     ChooseLocation,
 
@@ -24,8 +30,8 @@ public enum LauncherScreen
 /// <summary>
 /// Zustand und Abläufe des Launcher-Fensters. Kennt keine Avalonia-Typen, damit es ohne Fenster testbar ist.
 /// <para>
-/// Ablauf: Launcher-Update → (erster Start: Spielordner wählen) → Manifest laden → Dateien vergleichen
-/// → fehlende laden → „Spielen“.
+/// Ablauf: Launcher-Update → Anmeldung prüfen (sonst „Mit Discord anmelden“) → (erster Start: Spielordner wählen)
+/// → Manifest laden → Dateien vergleichen → fehlende laden → „Spielen“.
 /// </para>
 /// </summary>
 public sealed partial class MainWindowViewModel : ObservableObject
@@ -33,17 +39,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private static readonly CultureInfo German = CultureInfo.GetCultureInfo("de-DE");
 
     private readonly ILauncherUpdater _launcherUpdater;
+    private readonly IAccountService? _accounts;
     private readonly Func<string, GameInstaller>? _createInstaller;
     private readonly LauncherSettingsStore _settings;
     private readonly string _defaultGameDirectory;
     private readonly IGameStarter _gameStarter;
     private readonly IPlatformServices _platform;
     private CancellationTokenSource? _downloadCancellation;
+    private CancellationTokenSource? _signInCancellation;
     private long _requiredBytes;
 
+    /// <param name="accounts">Discord-Login; <c>null</c>, wenn kein Backend eingestellt ist.</param>
     /// <param name="createInstaller">Erzeugt den Installer für einen Spielordner; <c>null</c>, wenn kein Update-Server eingestellt ist.</param>
     public MainWindowViewModel(
         ILauncherUpdater launcherUpdater,
+        IAccountService? accounts,
         Func<string, GameInstaller>? createInstaller,
         LauncherSettingsStore settings,
         string defaultGameDirectory,
@@ -52,6 +62,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         string launcherVersion)
     {
         _launcherUpdater = launcherUpdater;
+        _accounts = accounts;
         _createInstaller = createInstaller;
         _settings = settings;
         _defaultGameDirectory = defaultGameDirectory;
@@ -67,14 +78,32 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public string LauncherVersion { get; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsWorking), nameof(IsChoosingLocation), nameof(IsReady), nameof(HasProblem))]
-    [NotifyCanExecuteChangedFor(nameof(PlayCommand), nameof(VerifyCommand), nameof(RetryCommand), nameof(MoveGameCommand), nameof(InstallCommand), nameof(ChooseFolderCommand))]
+    [NotifyPropertyChangedFor(nameof(IsWorking), nameof(IsSignInScreen), nameof(IsSigningIn), nameof(IsChoosingLocation), nameof(IsReady), nameof(HasProblem))]
+    [NotifyCanExecuteChangedFor(nameof(PlayCommand), nameof(VerifyCommand), nameof(RetryCommand), nameof(MoveGameCommand), nameof(InstallCommand), nameof(ChooseFolderCommand),
+        nameof(SignInCommand), nameof(CancelSignInCommand), nameof(ReopenBrowserCommand), nameof(SignOutCommand))]
     public partial LauncherScreen Screen { get; set; } = LauncherScreen.Working;
 
     public bool IsWorking => Screen == LauncherScreen.Working;
+    public bool IsSignInScreen => Screen == LauncherScreen.SignIn;
+    public bool IsSigningIn => Screen == LauncherScreen.SigningIn;
     public bool IsChoosingLocation => Screen == LauncherScreen.ChooseLocation;
     public bool IsReady => Screen == LauncherScreen.Ready;
     public bool HasProblem => Screen == LauncherScreen.Problem;
+
+    /// <summary>Discord-Name des angemeldeten Spielers, <c>null</c> wenn nicht angemeldet.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSignedIn), nameof(AccountInitial))]
+    [NotifyCanExecuteChangedFor(nameof(PlayCommand), nameof(SignOutCommand))]
+    public partial string? AccountName { get; set; }
+
+    public bool IsSignedIn => AccountName is not null;
+
+    /// <summary>Erster Buchstabe des Namens für das kleine Profil-Kästchen.</summary>
+    public string AccountInitial => string.IsNullOrEmpty(AccountName) ? "" : char.ToUpperInvariant(AccountName[0]).ToString();
+
+    /// <summary>Die Anmeldung ist gespeichert, konnte aber beim Start nicht beim Backend geprüft werden.</summary>
+    [ObservableProperty]
+    public partial bool IsAccountOffline { get; set; }
 
     [ObservableProperty]
     public partial string StatusText { get; set; } = "Starte …";
@@ -165,6 +194,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private async Task PrepareGameAsync(CancellationToken cancellationToken)
     {
+        if (!IsSignedIn && !await RestoreSessionAsync(cancellationToken))
+            return;
+
         if (_createInstaller is null)
         {
             ShowProblem("Kein Update-Server eingestellt",
@@ -192,6 +224,96 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         GameDirectory = directory;
         await UpdateGameAsync(verifyAll: false, cancellationToken);
+    }
+
+    // ---------------------------------------------------------------- Anmeldung
+
+    /// <summary>Gespeicherte Anmeldung prüfen. <c>false</c>, wenn sich der Spieler erst anmelden muss.</summary>
+    private async Task<bool> RestoreSessionAsync(CancellationToken cancellationToken)
+    {
+        if (_accounts is null)
+        {
+            ShowProblem("Kein Anmeldeserver eingestellt",
+                "Dieser Launcher wurde ohne Backend-Adresse gebaut.",
+                $"Zum Testen die Umgebungsvariable {LauncherOptions.BackendUrlVariable} setzen.");
+            return false;
+        }
+
+        ShowWorking("Prüfe Anmeldung …");
+        var check = await _accounts.RestoreAsync(cancellationToken);
+        if (check.Status == SessionStatus.SignedOut)
+        {
+            ShowSignIn(null);
+            return false;
+        }
+
+        AccountName = check.DisplayName;
+        IsAccountOffline = check.Status == SessionStatus.Offline;
+        return true;
+    }
+
+    [RelayCommand(CanExecute = nameof(IsSignInScreen))]
+    private async Task SignInAsync(CancellationToken cancellationToken)
+    {
+        Screen = LauncherScreen.SigningIn;
+        StatusText = "Warte auf Discord …";
+        DetailText = "Bestätige die Anmeldung im Browser. Danach geht es hier von selbst weiter.";
+        HintText = null;
+        IsProgressIndeterminate = true;
+
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _signInCancellation = cancellation;
+        try
+        {
+            var account = await _accounts!.SignInAsync(cancellation.Token);
+            AccountName = account.DisplayName;
+            IsAccountOffline = false;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            ShowSignIn(null);
+            return;
+        }
+        catch (SignInException ex)
+        {
+            ShowSignIn(ex.Message);
+            return;
+        }
+        finally
+        {
+            _signInCancellation = null;
+        }
+
+        await PrepareGameAsync(cancellationToken);
+    }
+
+    [RelayCommand(CanExecute = nameof(IsSigningIn))]
+    private void CancelSignIn() => _signInCancellation?.Cancel();
+
+    [RelayCommand(CanExecute = nameof(IsSigningIn))]
+    private void ReopenBrowser() => _accounts?.ReopenBrowser();
+
+    [RelayCommand(CanExecute = nameof(CanSignOut))]
+    private async Task SignOutAsync()
+    {
+        IsSettingsOpen = false;
+        await _accounts!.SignOutAsync();
+        AccountName = null;
+        IsAccountOffline = false;
+        ShowSignIn(null);
+    }
+
+    /// <summary>Nicht mitten im Download oder Verschieben.</summary>
+    private bool CanSignOut() => IsSignedIn && !IsWorking && !IsSigningIn;
+
+    private void ShowSignIn(string? error)
+    {
+        Screen = LauncherScreen.SignIn;
+        StatusText = "Melde dich an, um zu spielen";
+        DetailText = "Der Launcher öffnet Discord in deinem Browser. Das Spiel erfährt nur deinen Namen und dein Profilbild.";
+        HintText = error;
+        IsProgressIndeterminate = false;
+        Progress = 0;
     }
 
     // ---------------------------------------------------------------- Erster Start: Ordner wählen
@@ -366,7 +488,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         try
         {
-            _gameStarter.Start(ExecutablePath!);
+            _gameStarter.Start(ExecutablePath!, _accounts!.GetGameEnvironment());
             if (CloseOnGameStart)
                 CloseRequested?.Invoke(this, EventArgs.Empty);
         }
@@ -376,7 +498,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    private bool CanPlay() => !IsWorking && ExecutablePath is not null;
+    private bool CanPlay() => !IsWorking && !IsSignInScreen && !IsSigningIn && IsSignedIn && ExecutablePath is not null;
 
     // ---------------------------------------------------------------- Einstellungen
 

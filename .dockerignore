@@ -1,0 +1,14 @@
+# Docker braucht nur die .NET-Quellen (siehe deploy/*.Dockerfile).
+**/bin/
+**/obj/
+artifacts/
+client/
+assets-src/
+maps/
+docs/
+.git/
+.github/
+.vs/
+.idea/
+**/*.user
+**/appsettings.Development.json

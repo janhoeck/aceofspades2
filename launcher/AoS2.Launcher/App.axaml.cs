@@ -39,8 +39,18 @@ public sealed class App : Application
             createInstaller = directory => new GameInstaller(source, directory);
         }
 
+        IAccountService? accounts = null;
+        if (options.BackendUrl is not null && OperatingSystem.IsWindows())
+        {
+            var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd($"AoS2-Launcher/{launcherVersion}");
+            var store = new SessionStore(options.SessionPath, new DpapiProtector());
+            accounts = new AccountService(http, options.BackendUrl, store, platform.OpenUrl);
+        }
+
         return new MainWindowViewModel(
             new VelopackLauncherUpdater(options.LauncherUpdateLocation),
+            accounts,
             createInstaller,
             new LauncherSettingsStore(options.SettingsPath),
             options.DefaultGameDirectory,

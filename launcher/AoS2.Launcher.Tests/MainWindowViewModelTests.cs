@@ -1,3 +1,4 @@
+using AoS2.Contracts;
 using AoS2.Launcher.Services;
 using AoS2.Launcher.ViewModels;
 using AoS2.Updates;
@@ -14,6 +15,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     private readonly FakeLauncherUpdater _launcherUpdater = new();
     private readonly FakeGameStarter _gameStarter = new();
     private readonly FakePlatform _platform = new();
+    private readonly FakeAccounts _accounts = new();
 
     private static readonly Dictionary<string, string> Files = new()
     {
@@ -30,7 +32,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
     public void Dispose() => _temp.Dispose();
 
-    private MainWindowViewModel CreateViewModel(bool withServer = true, Func<IUpdateSource, IUpdateSource>? wrapSource = null)
+    private MainWindowViewModel CreateViewModel(bool withServer = true, Func<IUpdateSource, IUpdateSource>? wrapSource = null, bool withBackend = true)
     {
         IUpdateSource source = new DirectoryUpdateSource(_storage);
         if (wrapSource is not null)
@@ -38,6 +40,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         return new MainWindowViewModel(
             _launcherUpdater,
+            withBackend ? _accounts : null,
             withServer ? dir => new GameInstaller(source, dir) { RetryDelay = TimeSpan.Zero } : null,
             _settings,
             _defaultGame,
@@ -173,6 +176,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         Assert.True(closed);
         Assert.Equal(Path.Combine(_defaultGame, "AoS2.exe"), _gameStarter.StartedPath);
+        Assert.Equal("aos2_token", _gameStarter.Environment![LaunchEnvironment.SessionToken]);
     }
 
     [Fact]
@@ -190,6 +194,150 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.NotNull(_gameStarter.StartedPath);
         Assert.False(_settings.Load().CloseOnGameStart);
         Assert.Equal(_defaultGame, _settings.Load().GameDirectory);
+    }
+
+    // ---------------------------------------------------------------- Anmeldung
+
+    [Fact]
+    public async Task Start_SignedIn_ShowsNameAndContinues()
+    {
+        await TestRelease.PublishAsync(_storage, "0.1.0", Files);
+        var vm = CreateViewModel();
+
+        await vm.StartCommand.ExecuteAsync(null);
+
+        Assert.Equal("Jan", vm.AccountName);
+        Assert.Equal("J", vm.AccountInitial);
+        Assert.False(vm.IsAccountOffline);
+        Assert.Equal(LauncherScreen.ChooseLocation, vm.Screen);
+    }
+
+    [Fact]
+    public async Task Start_SignedOut_AsksForLogin_BeforeAnythingElse()
+    {
+        await TestRelease.PublishAsync(_storage, "0.1.0", Files);
+        _accounts.Restore = new(SessionStatus.SignedOut, null);
+        var vm = CreateViewModel();
+
+        await vm.StartCommand.ExecuteAsync(null);
+
+        Assert.Equal(LauncherScreen.SignIn, vm.Screen);
+        Assert.False(vm.IsSignedIn);
+        Assert.Null(vm.HintText);
+        Assert.True(vm.SignInCommand.CanExecute(null));
+        Assert.False(vm.PlayCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Start_BackendOffline_KeepsSavedLogin()
+    {
+        await TestRelease.PublishAsync(_storage, "0.1.0", Files);
+        _accounts.Restore = new(SessionStatus.Offline, "Jan");
+        var vm = CreateViewModel();
+
+        await vm.StartCommand.ExecuteAsync(null);
+
+        Assert.Equal("Jan", vm.AccountName);
+        Assert.True(vm.IsAccountOffline);
+        Assert.Equal(LauncherScreen.ChooseLocation, vm.Screen);
+    }
+
+    [Fact]
+    public async Task Start_NoBackendUrl_ShowsProblem()
+    {
+        var vm = CreateViewModel(withBackend: false);
+
+        await vm.StartCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasProblem);
+        Assert.Contains(LauncherOptions.BackendUrlVariable, vm.HintText);
+        Assert.False(vm.PlayCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task SignIn_WaitsForBrowser_ThenContinuesWithGame()
+    {
+        await TestRelease.PublishAsync(_storage, "0.1.0", Files);
+        _accounts.Restore = new(SessionStatus.SignedOut, null);
+        var vm = CreateViewModel();
+        await vm.StartCommand.ExecuteAsync(null);
+
+        var signIn = vm.SignInCommand.ExecuteAsync(null);
+        Assert.Equal(LauncherScreen.SigningIn, vm.Screen);
+        Assert.Equal(1, _accounts.BrowserOpened);
+        Assert.True(vm.CancelSignInCommand.CanExecute(null));
+        vm.ReopenBrowserCommand.Execute(null);
+        Assert.Equal(2, _accounts.BrowserOpened);
+
+        _accounts.PendingSignIn.SetResult(new AccountInfo { Id = Guid.NewGuid(), DisplayName = "Nelly" });
+        await signIn;
+
+        Assert.Equal("Nelly", vm.AccountName);
+        Assert.Equal(LauncherScreen.ChooseLocation, vm.Screen);
+    }
+
+    [Fact]
+    public async Task SignIn_Cancel_GoesBackToLogin()
+    {
+        _accounts.Restore = new(SessionStatus.SignedOut, null);
+        var vm = CreateViewModel();
+        await vm.StartCommand.ExecuteAsync(null);
+
+        var signIn = vm.SignInCommand.ExecuteAsync(null);
+        vm.CancelSignInCommand.Execute(null);
+        await signIn.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(LauncherScreen.SignIn, vm.Screen);
+        Assert.Null(vm.HintText);
+        Assert.False(vm.IsSignedIn);
+    }
+
+    [Fact]
+    public async Task SignIn_Fails_ShowsReason()
+    {
+        _accounts.Restore = new(SessionStatus.SignedOut, null);
+        var vm = CreateViewModel();
+        await vm.StartCommand.ExecuteAsync(null);
+
+        var signIn = vm.SignInCommand.ExecuteAsync(null);
+        _accounts.PendingSignIn.SetException(new SignInException("Du hast die Anmeldung bei Discord abgebrochen."));
+        await signIn;
+
+        Assert.Equal(LauncherScreen.SignIn, vm.Screen);
+        Assert.Equal("Du hast die Anmeldung bei Discord abgebrochen.", vm.HintText);
+    }
+
+    [Fact]
+    public async Task SignOut_ReturnsToLogin_AndBlocksPlay()
+    {
+        await TestRelease.PublishAsync(_storage, "0.1.0", Files);
+        var vm = await InstallAsync();
+        vm.OpenSettingsCommand.Execute(null);
+        Assert.True(vm.SignOutCommand.CanExecute(null));
+
+        await vm.SignOutCommand.ExecuteAsync(null);
+
+        Assert.True(_accounts.SignedOut);
+        Assert.False(vm.IsSettingsOpen);
+        Assert.Null(vm.AccountName);
+        Assert.Equal(LauncherScreen.SignIn, vm.Screen);
+        Assert.False(vm.PlayCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task SignInAgain_AfterSignOut_GameIsReadyAgain()
+    {
+        await TestRelease.PublishAsync(_storage, "0.1.0", Files);
+        var vm = await InstallAsync();
+        await vm.SignOutCommand.ExecuteAsync(null);
+
+        var signIn = vm.SignInCommand.ExecuteAsync(null);
+        _accounts.PendingSignIn.SetResult(new AccountInfo { Id = Guid.NewGuid(), DisplayName = "Max" });
+        await signIn;
+
+        Assert.Equal("Max", vm.AccountName);
+        Assert.Equal(LauncherScreen.Ready, vm.Screen);
+        Assert.True(vm.PlayCommand.CanExecute(null));
     }
 
     // ---------------------------------------------------------------- Launcher-Update und Fehler
@@ -398,7 +546,10 @@ public sealed class MainWindowViewModelTests : IDisposable
     private sealed class FakeGameStarter : IGameStarter
     {
         public string? StartedPath { get; private set; }
-        public void Start(string executablePath) => StartedPath = executablePath;
+        public IReadOnlyDictionary<string, string>? Environment { get; private set; }
+
+        public void Start(string executablePath, IReadOnlyDictionary<string, string> environment) =>
+            (StartedPath, Environment) = (executablePath, environment);
     }
 
     private sealed class FakePlatform : IPlatformServices
@@ -410,6 +561,40 @@ public sealed class MainWindowViewModelTests : IDisposable
         public Task<string?> PickFolderAsync(string title, string? startDirectory) => Task.FromResult(NextFolder);
         public void OpenFolder(string path) => OpenedFolder = path;
         public long? GetAvailableBytes(string path) => FreeBytes;
+        public void OpenUrl(string url) { }
+    }
+
+    /// <summary>Anmeldung ohne Backend. Standard: gespeicherte Anmeldung „Jan“ ist gültig.</summary>
+    private sealed class FakeAccounts : IAccountService
+    {
+        public SessionCheck Restore { get; set; } = new(SessionStatus.SignedIn, "Jan");
+
+        /// <summary>Hält <see cref="SignInAsync"/> an, bis der Test sie beendet.</summary>
+        public TaskCompletionSource<AccountInfo> PendingSignIn { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int BrowserOpened { get; private set; }
+        public bool SignedOut { get; private set; }
+
+        public Task<SessionCheck> RestoreAsync(CancellationToken cancellationToken) => Task.FromResult(Restore);
+
+        public async Task<AccountInfo> SignInAsync(CancellationToken cancellationToken)
+        {
+            BrowserOpened++;
+            var account = await PendingSignIn.Task.WaitAsync(cancellationToken);
+            PendingSignIn = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            return account;
+        }
+
+        public void ReopenBrowser() => BrowserOpened++;
+
+        public Task SignOutAsync()
+        {
+            SignedOut = true;
+            return Task.CompletedTask;
+        }
+
+        public IReadOnlyDictionary<string, string> GetGameEnvironment() =>
+            new Dictionary<string, string> { [LaunchEnvironment.SessionToken] = "aos2_token" };
     }
 
     /// <summary>Hält Datei-Downloads an, bis <see cref="Open"/> gesetzt ist oder abgebrochen wird.</summary>
