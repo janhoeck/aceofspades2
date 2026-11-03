@@ -420,7 +420,7 @@ namespace AoS2.Client.Tests
             UnityEngine.Object.Destroy(target);
         }
 
-        private static string FindServer()
+        internal static string FindServer()
         {
             foreach (var config in new[] { "debug", "release" })
             {
@@ -430,7 +430,7 @@ namespace AoS2.Client.Tests
             return null;
         }
 
-        private static int FreeUdpPort()
+        internal static int FreeUdpPort()
         {
             using (var probe = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0)))
                 return ((IPEndPoint)probe.Client.LocalEndPoint).Port;

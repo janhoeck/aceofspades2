@@ -70,6 +70,89 @@ namespace AoS2.Backend.Data.Migrations
                     b.ToTable("accounts", (string)null);
                 });
 
+            modelBuilder.Entity("AoS2.Backend.Data.ListedServer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(270)
+                        .HasColumnType("character varying(270)")
+                        .HasColumnName("address");
+
+                    b.Property<string>("GameVersion")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("game_version");
+
+                    b.Property<DateTime>("LastHeartbeatAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_heartbeat_at");
+
+                    b.Property<string>("Map")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("map");
+
+                    b.Property<int>("MaxPlayers")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_players");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("name");
+
+                    b.Property<bool>("Official")
+                        .HasColumnType("boolean")
+                        .HasColumnName("official");
+
+                    b.Property<int>("Players")
+                        .HasColumnType("integer")
+                        .HasColumnName("players");
+
+                    b.Property<int>("ProtocolVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("protocol_version");
+
+                    b.Property<DateTime>("RegisteredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("registered_at");
+
+                    b.Property<string>("RegisteredFromIp")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("registered_from_ip");
+
+                    b.Property<string>("SecretHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("secret_hash");
+
+                    b.HasKey("Id")
+                        .HasName("pk_listed_servers");
+
+                    b.HasIndex("Address")
+                        .IsUnique()
+                        .HasDatabaseName("ix_listed_servers_address");
+
+                    b.HasIndex("LastHeartbeatAt")
+                        .HasDatabaseName("ix_listed_servers_last_heartbeat_at");
+
+                    b.HasIndex("RegisteredFromIp")
+                        .HasDatabaseName("ix_listed_servers_registered_from_ip");
+
+                    b.ToTable("listed_servers", (string)null);
+                });
+
             modelBuilder.Entity("AoS2.Backend.Data.LoginAttempt", b =>
                 {
                     b.Property<string>("Id")

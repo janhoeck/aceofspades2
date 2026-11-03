@@ -5,10 +5,11 @@
 // Alle Einträge sind optional; was fehlt, hat den Standardwert. Werte auf der Kommandozeile gelten vor der Datei.
 // Kommentare mit // sind erlaubt, unbekannte Einträge ein Fehler (gegen Tippfehler).
 {
-  // Name des Servers (Anzeige; ab M7 im Server-Browser)
+  // Name des Servers im Server-Browser (höchstens 40 Zeichen)
   "name": "Ace of Spades 2",
 
-  // UDP-Port. Für Spieler aus dem Internet muss er im Router weitergeleitet und in der Firewall freigegeben sein.
+  // UDP-Port. Für Spieler aus dem Internet muss er im Router weitergeleitet und in der Firewall freigegeben sein
+  // (Anleitung: docs/self-hosting.md).
   "port": 32887,
 
   // Map aus dem maps-Ordner, ohne .aos2map
@@ -31,13 +32,19 @@
   // Teambeschuss: Können Mitspieler sich gegenseitig verletzen? Eigene Explosionen schaden immer.
   "friendlyFire": false,
 
-  // ---- Anmeldung (Join-Tickets) ----
+  // ---- Anmeldung (Join-Tickets) und Server-Browser ----
 
-  // Adresse der Website. Von dort holt der Server die öffentlichen Schlüssel, mit denen er Join-Tickets prüft.
+  // Adresse der Website. Von dort holt der Server die öffentlichen Schlüssel, mit denen er Join-Tickets prüft,
+  // und dort meldet er sich für den Server-Browser an.
   "site": "https://aos2.example.org",
 
-  // Adresse dieses Servers, genau so, wie Spieler sie im Spiel eingeben (steht im Join-Ticket).
+  // Adresse dieses Servers, genau so, wie Spieler sie im Spiel eingeben (steht im Join-Ticket und im Server-Browser):
+  // deine öffentliche IP-Adresse oder ein Domainname, mit Port. Keine Adresse aus dem Heimnetz (192.168.…).
   "address": "play.example.org:32887",
+
+  // Im Server-Browser anzeigen. Beim ersten Heartbeat prüft das Backend, ob der Server unter address von außen
+  // erreichbar ist. false = nur wer die Adresse kennt, kann sich verbinden.
+  "listed": true,
 
   // Entwicklungsmodus: nimmt auch selbst ausgestellte Entwicklungs-Tickets an, die JEDER fälschen kann.
   // Nur zum lokalen Testen, nie für einen Server, der aus dem Internet erreichbar ist.

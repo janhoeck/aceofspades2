@@ -122,11 +122,19 @@ Der Workflow `.github/workflows/release.yml` läuft dann so ab:
 | Job | Läuft auf | Macht |
 |---|---|---|
 | Version bestimmen | Ubuntu | `v0.1.0` → `0.1.0`, bricht bei ungültigem Tag ab |
-| .NET bauen und testen | Ubuntu | wie bei Pull Requests |
+| .NET bauen und testen | Ubuntu | wie bei Pull Requests (mit Git LFS) |
+| GitHub-Release anlegen | Ubuntu | leeres Release mit automatischen Notizen; die anderen Jobs laden ihre Dateien hinein |
 | Spiel bauen und hochladen | Ubuntu (Docker) | nur wenn `UNITY_CI_ENABLED = true`: GameCI-Build → ManifestBuilder → `upload-game.ps1` |
 | Launcher paketieren und hochladen | Windows | `pack-launcher.ps1 -Upload` → R2 `launcher/`, Setup.exe ins GitHub-Release |
+| Server-Downloads | Ubuntu | `pack-server.ps1` → `AoS2.Server-<v>-win-x64.zip`, `…-linux-x64.tar.gz`, `…-linux-arm64.tar.gz` ins GitHub-Release |
+| Server-Image | Ubuntu | `deploy/server.Dockerfile` für amd64 und arm64 → `ghcr.io/<owner>/aos2-server:<v>` und `:latest` |
+| Images (Website, Backend) | Ubuntu | → ghcr.io, danach Coolify-Redeploy (siehe [backend.md](backend.md#45-github-variablen-und-secrets)) |
 
-Neue Spieler laden `AoS2-Setup.exe` aus dem GitHub-Release (oder direkt `<Update-URL>/launcher/AoS2.Launcher-win-Setup.exe`).
+Neue Spieler laden `AoS2-Setup.exe` aus dem GitHub-Release (oder direkt `<Update-URL>/launcher/AoS2.Launcher-win-Setup.exe`). Self-Hoster finden dort den Server ([self-hosting.md](self-hosting.md)).
+
+Die Server-Downloads lokal bauen (z. B. zum Ausprobieren): `./tools/release/pack-server.ps1 -Version 0.7.0`, Ergebnis in `artifacts/release/server/`. Vorher `git lfs pull`, sonst fehlt die Map; das Skript prüft das.
+
+Nach dem **ersten** Release mit Server-Image das Package `aos2-server` auf GitHub öffentlich stellen (**Profil → Packages → aos2-server → Package settings → Change visibility → Public**), sonst können Self-Hoster und Coolify es nicht ohne Anmeldung laden.
 
 > Der Launcher ist nicht signiert. Windows SmartScreen warnt deshalb beim ersten Start („Weitere Informationen → Trotzdem ausführen“). Code-Signing ist für M9 geplant.
 
@@ -177,6 +185,7 @@ Deinstallieren: Windows-Einstellungen → Apps → „Ace of Spades 2“.
 | `tools/release/build-game.ps1` | Unity-Build + ManifestBuilder (+ Upload) |
 | `tools/release/upload-game.ps1` | `game/` nach R2: erst Objekte, zuletzt das Manifest |
 | `tools/release/pack-launcher.ps1` | `dotnet publish` + Velopack (+ Upload) |
+| `tools/release/pack-server.ps1` | Spielserver self-contained als Download für Windows und Linux |
 | `vpk` | Velopack-Kommandozeile, als lokales .NET-Tool in `dotnet-tools.json` festgelegt |
 
 Unity-Build von Hand im Editor: Menü **AoS2 → Windows-Build erstellen** (landet in `client/Builds/`).
@@ -192,3 +201,4 @@ Unity-Build von Hand im Editor: Menü **AoS2 → Windows-Build erstellen** (land
 | „Dateifehler … Läuft das Spiel noch?“ | Das Spiel ist offen und Windows sperrt die Dateien. Spiel beenden, „Erneut versuchen“. |
 | AWS CLI: Fehler zu Checksums | Das Skript setzt `AWS_REQUEST_CHECKSUM_CALCULATION=when_required`. Bei eigenen Aufrufen ebenfalls setzen. |
 | Job „Spiel bauen“ wird übersprungen | Variable `UNITY_CI_ENABLED` fehlt oder ist nicht `true`. |
+| Bei jedem Push ein fehlgeschlagener Lauf „.github/workflows/release.yml“ ohne Jobs | Die Workflow-Datei ist ungültig (YAML). GitHub zeigt auf der Seite des Laufs die Zeile. So war es bis M7: `run: curl … "Authorization: Bearer …"` in einer Zeile ohne Anführungszeichen; `: ` hält YAML für einen neuen Schlüssel. Lösung: `run: |` mit dem Befehl in der nächsten Zeile. |

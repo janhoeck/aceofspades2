@@ -17,6 +17,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AoS2.Backend\AoS2.Backend.csproj" />
+    <!-- Für den Ende-zu-Ende-Test des Server-Browsers: echter Spielserver und Ping wie im Spiel. -->
+    <ProjectReference Include="..\..\server\AoS2.Server\AoS2.Server.csproj" />
+    <ProjectReference Include="..\..\libs\AoS2.Net\AoS2.Net.csproj" />
   </ItemGroup>
 
   <ItemGroup>

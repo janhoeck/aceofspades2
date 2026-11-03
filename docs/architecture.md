@@ -369,14 +369,51 @@ So kann ein Community-Server die Identität eines Spielers prüfen, ohne ihm Zug
 
 ## 7. Server-Browser & Self-Hosting
 
-- Spielserver melden sich alle ~30 Sekunden beim Backend (Heartbeat: Name, Map, Spieler, Version, Port).
+- Spielserver melden sich alle ~30 Sekunden beim Backend (Heartbeat: Name, Map, Spieler, Version, Protokollversion, Adresse mit Port).
 - Das Backend prüft beim ersten Heartbeat, ob der Server von außen erreichbar ist, und begrenzt Anmeldungen pro IP.
 - Der Client lädt die Serverliste vom Backend und misst den Ping direkt zum Server.
 - Server mit inkompatibler Protokollversion werden ausgeblendet.
-- Self-Hoster bekommen den Server als **Windows-/Linux-Download** (GitHub Releases) und als **Docker-Image** (GitHub Container Registry), dazu eine Beispiel-Config.
-- **Config-Datei (seit M6):** JSON mit Kommentaren, `server/AoS2.Server/server.example.json` liegt neben der exe. Ein Objekt mit flachen Einträgen (`name`, `port`, `map`, `playersPerTeam`, `scoreLimit`, `timeLimitMinutes`, `matchEndSeconds`, `friendlyFire`, `site`, `address`, `dev`, optional `data`/`maps`), Start mit `--config server.json`; Werte auf der Kommandozeile gelten vor der Datei. Unbekannte Einträge sind ein Fehler (gegen Tippfehler). So kann ein Docker-Image die Datei einfach einbinden, und M7 ergänzt nur Einträge (z. B. Heartbeat, Server-Schlüssel), ohne das Format zu ändern. `name` ist schon da, damit Server-Betreiber ihn jetzt setzen können.
-- **Offen:** Brauchen Self-Hoster einen Server-Schlüssel aus ihrem Account (verhindert Spam in der Liste)?
+- Self-Hoster bekommen den Server als **Windows-/Linux-Download** (GitHub Releases) und als **Docker-Image** (GitHub Container Registry), dazu eine Beispiel-Config. Anleitung: [self-hosting.md](self-hosting.md).
+- **Config-Datei (seit M6):** JSON mit Kommentaren, `server/AoS2.Server/server.example.json` liegt neben der exe. Ein Objekt mit flachen Einträgen (`name`, `port`, `map`, `playersPerTeam`, `scoreLimit`, `timeLimitMinutes`, `matchEndSeconds`, `friendlyFire`, `site`, `address`, `listed`, `dev`, optional `data`/`maps`), Start mit `--config server.json`; Werte auf der Kommandozeile gelten vor der Datei. Unbekannte Einträge sind ein Fehler (gegen Tippfehler). M7 hat nur `listed` (und `--name`, `--unlisted` auf der Kommandozeile) ergänzt.
+- **Entscheidung M7: Kein Server-Schlüssel für Self-Hoster.** Jeder Server, der die Erreichbarkeitsprüfung besteht, erscheint in der Liste. Vorteil: Self-Hosting ohne Konto und ohne Kontoseite auf der Website (die es noch nicht gibt). Nachteil: Spam von vielen IP-Adressen aus wäre möglich, gesperrt werden kann nur nach IP. Dagegen schützen die Prüfung mit Nachweis, die Grenzen pro IP und der Ablauf ohne Heartbeat (siehe unten). Ein optionaler Schlüssel kann später als neues Feld im Heartbeat dazukommen, ohne das Format zu ändern.
 - Community-Server sind nicht vertrauenswürdig. Sollte es später Statistiken/Ranglisten geben, zählen nur offizielle Server.
+
+### Umsetzung (seit M7)
+
+| Teil | Wo | Aufgabe |
+|---|---|---|
+| UDP-Abfrage | `AoS2.Shared/Net/ServerQuery.cs` | `ServerQuery` (Anfrage, immer 80 Byte) und `ServerInfo` (Antwort: Protokollversion, Nachweis, Name, Map, Spieler, Plätze), `ServerProof` (HMAC-SHA256), `ServerListing` (Regeln für Name und Map) |
+| Spielserver | `GameServer` (beantwortet Abfragen), `Heartbeat.cs` | Heartbeat, Abmelden beim Beenden, Log mit Grund bei Ablehnung |
+| Backend | `backend/AoS2.Backend/Servers` (`ServerEndpoints`, `UdpServerProbe`), Tabelle `listed_servers` | Heartbeat annehmen, Erreichbarkeit prüfen, Grenzen, Liste |
+| Datenformate | `AoS2.Contracts/ServerBrowser.cs` | Heartbeat, Liste |
+| Client | `AoS2.Net` (`ServerPinger`, `ServerList`), Unity: `ServerBrowser`, `StartMenu` | Liste laden, Ping messen, Filter, Sortierung, Beitreten, direkt verbinden |
+
+**Erreichbarkeitsprüfung, Schritt für Schritt:**
+1. Der Server erzeugt beim Start ein zufälliges Geheimnis und schickt es im Heartbeat mit (HTTPS über die Website).
+2. Kennt das Backend die Adresse noch nicht, oder kommt ein anderes Geheimnis (Neustart), oder war der Server abgelaufen: Es schickt eine `ServerQuery` mit einer zufälligen Challenge per UDP an die angegebene Adresse (bis zu 3 Versuche à 0,7 s).
+3. Der Server antwortet mit `HMAC-SHA256(Geheimnis, Challenge)`. Nur wer das Geheimnis aus dem Heartbeat kennt, kann das. Damit ist bewiesen, dass der Absender des Heartbeats wirklich unter dieser Adresse erreichbar ist. Niemand kann einen fremden Server unter falschem Namen eintragen oder einen Eintrag kapern, denn spätere Heartbeats für die Adresse müssen dasselbe Geheimnis tragen. Gespeichert ist nur dessen SHA-256.
+4. Die Protokollversion aus der UDP-Antwort muss zum Heartbeat passen.
+
+**Schutz gegen Missbrauch:**
+
+| Was | Grenze |
+|---|---|
+| Heartbeats | 60 pro Minute und IP-Adresse (Rate Limiter) |
+| Community-Server in der Liste | 8 pro IP-Adresse (offizielle ausgenommen) |
+| Erreichbarkeitsprüfungen | 20 pro IP-Adresse in 10 Minuten; der Server wartet nach einer Ablehnung 60 s |
+| Ablauf | 90 s ohne Heartbeat: nicht mehr in der Liste; nach 10 Minuten gelöscht |
+| Adressen | nur öffentliche (kein Heimnetz, localhost, Carrier-NAT), sonst würde das Backend Pakete ins eigene Netz schicken; zum Testen `ServerBrowser:AllowPrivateAddresses` |
+| UDP-Antworten des Spielservers | höchstens 10 pro Sekunde und IP-Adresse, 500 insgesamt; die Antwort ist höchstens dreimal so groß wie die feste Anfrage, der Server taugt also kaum als Verstärker für Angriffe mit gefälschtem Absender |
+
+Die IP-Adresse kommt aus `X-Forwarded-For`: Die Website übernimmt die erste Adresse aus dem Header des Coolify-Proxys (Traefik überschreibt die vom Client mitgeschickten `X-Forwarded-*`-Header) und reicht sie an das Backend weiter.
+
+**Offizielle Server** weisen sich mit einem Schlüssel aus der Backend-Config aus (`ServerBrowser:OfficialKey`, beim Server die Umgebungsvariable `AOS2_OFFICIAL_KEY`). Sie stehen oben in der Liste und zählen nicht zur Grenze pro IP ([backend.md](backend.md#46-offizielle-spielserver)).
+
+**Im Spiel:** Der Reiter **Server-Browser** lädt `GET /api/servers?protocol=<eigene Version>` (alle 30 s neu, solange das Menü offen ist) und schickt jedem Server eine `ServerQuery`. Die Zeit bis zur Antwort ist der Ping, die Antwort bringt die aktuelle Spielerzahl. Ausgeblendet werden Server mit anderer Protokollversion (schon im Backend, zur Sicherheit noch einmal im Client, auch wenn die UDP-Antwort eine andere Version meldet). Filter: volle und leere ausblenden, Map; Sortierung nach Spielern, Ping oder Name, offizielle immer oben. **Beitreten** holt das Join-Ticket für genau die Adresse aus der Liste. Der Reiter **Direkt verbinden** nimmt eine Adresse `host:port` und kann den Server vorher mit derselben Abfrage prüfen.
+
+**Warum die Adresse fest im Server steht:** Ein Join-Ticket gilt nur für die Adresse, die der Client angibt. So kann ein bösartiger Server ein Ticket nicht an einen anderen Server weiterreichen. Würde der Client die Adresse vom Server erfragen, ginge dieser Schutz verloren. Deshalb trägt der Betreiber `address` selbst ein, und der Browser nutzt die vom Backend geprüfte Adresse.
+
+**Protokollversion:** bleibt 3. Die Abfrage kommt neu dazu, an der Verbindung ändert sich nichts. Der Anfang von `ServerQuery`/`ServerInfo` (Kennung, Nonce, Protokollversion, Nachweis) bleibt über alle Versionen gleich, damit Client und Backend auch Server anderer Versionen erkennen und prüfen können.
 
 ## 8. Launcher & Updates
 
@@ -405,18 +442,19 @@ So kann ein Community-Server die Identität eines Spielers prüfen, ohne ihm Zug
 | Website | Docker-Container, HTTPS über den Coolify-Proxy, einzige öffentliche Adresse |
 | Backend-API | Docker-Container ohne eigene Domain, nur über die Website erreichbar |
 | PostgreSQL | Coolify-Datenbank |
-| Offizielle Spielserver | Docker-Container mit **direkt freigegebenem UDP-Port** (der Coolify-Proxy leitet nur HTTP weiter) |
+| Offizielle Spielserver | Docker-Container mit **direkt freigegebenem UDP-Port** (der Coolify-Proxy leitet nur HTTP weiter), eigene Ressource `deploy/game-servers.compose.yml` |
 
-Konfiguration als Compose-Dateien in `deploy/`. Nach einem Release stößt die CI das Redeploy über den Coolify-Webhook an. Einrichtung: [backend.md](backend.md#44-coolify).
+Konfiguration als Compose-Dateien in `deploy/`: `docker-compose.yml` (Website und Backend), `game-servers.compose.yml` (offizielle Spielserver, getrennt, damit ein Redeploy der Website keine Matches beendet). Nach einem Release stößt die CI das Redeploy über die Coolify-Webhooks an. Einrichtung: [backend.md](backend.md#44-coolify), Spielserver: [backend.md](backend.md#46-offizielle-spielserver).
 
 ## 11. CI/CD (GitHub Actions)
 
 | Auslöser | Schritte |
 |---|---|
-| Pull Request | .NET-Projekte bauen und testen (Shared, Server, Backend, Launcher, Tools); Website: Lint, Tests, Build; beide Docker-Images testweise bauen |
-| Release-Tag | Unity-Client bauen (GameCI) → Manifest erzeugen → in den Update-Speicher hochladen |
-| | Server als Download + Docker-Image veröffentlichen |
+| Pull Request | .NET-Projekte bauen und testen (Shared, Server, Backend, Launcher, Tools; Checkout mit Git LFS, weil Tests die echte Map laden); Website: Lint, Tests, Build; alle drei Docker-Images testweise bauen, das Server-Image zusätzlich kurz starten |
+| Release-Tag | GitHub-Release anlegen |
+| | Unity-Client bauen (GameCI) → Manifest erzeugen → in den Update-Speicher hochladen |
+| | Server als Download (`tools/release/pack-server.ps1`: win-x64, linux-x64, linux-arm64, self-contained) ins GitHub-Release, Docker-Image für amd64 und arm64 nach ghcr.io |
 | | Launcher mit Velopack paketieren und veröffentlichen |
-| | Images von Website und Backend nach ghcr.io, Coolify-Redeploy auslösen |
+| | Images von Website und Backend nach ghcr.io, Coolify-Redeploy auslösen (auch für die offiziellen Spielserver) |
 
 Für Unity-Builds in GitHub Actions braucht GameCI die Unity-Lizenz als Secret. Bis das eingerichtet ist, kann der Client lokal gebaut und per Skript hochgeladen werden (`tools/release/build-game.ps1`). Workflow: `.github/workflows/release.yml`, Einrichtung: [release.md](release.md).

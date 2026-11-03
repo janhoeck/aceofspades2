@@ -1,0 +1,49 @@
+# Offizielle Spielserver auf Coolify (Einrichtung: docs/backend.md, Abschnitt 4.6).
+#
+# Eigene Coolify-Ressource, getrennt von Website und Backend (deploy/docker-compose.yml): So startet ein Redeploy der
+# Website nicht die laufenden Matches neu, und umgekehrt.
+#
+# Der Coolify-Proxy (Traefik) leitet nur HTTP weiter. Spieler kommen per UDP direkt auf den Server, deshalb ist der
+# Port unter "ports" direkt auf dem Coolify-Server freigegeben (und muss in dessen Firewall offen sein).
+# Keine Domain eintragen.
+#
+# Alle ${…}-Werte trägt man in Coolify unter "Environment Variables" ein.
+
+services:
+  game-1:
+    image: ghcr.io/janhoeck/aos2-server:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${GAME_1_PORT:-32887}:${GAME_1_PORT:-32887}/udp"
+    environment:
+      # Schlüssel für offizielle Server, derselbe wie ServerBrowser__OfficialKey im Backend.
+      AOS2_OFFICIAL_KEY: ${OFFICIAL_SERVER_KEY:?OFFICIAL_SERVER_KEY fehlt}
+    # Statt einer Config-Datei alles auf der Kommandozeile; die Werte kommen aus den Environment Variables.
+    command:
+      - --name
+      - "${GAME_1_NAME:-Ace of Spades 2 – Offiziell 1}"
+      - --port
+      - "${GAME_1_PORT:-32887}"
+      - --map
+      - "${GAME_1_MAP:-testmap}"
+      # Adresse der Website (Join-Tickets prüfen, Heartbeat für den Server-Browser), ohne "/" am Ende.
+      - --site
+      - "${SITE_URL:?SITE_URL fehlt}"
+      # So erreichen Spieler den Server: öffentlicher Name oder IP des Coolify-Servers plus Port, z. B. play.example.org:32887.
+      - --address
+      - "${GAME_HOST:?GAME_HOST fehlt}:${GAME_1_PORT:-32887}"
+    # docker stop schickt SIGTERM: Der Server trennt die Spieler sauber und meldet sich aus dem Server-Browser ab.
+    stop_grace_period: 10s
+
+  # Ein zweiter Server: diesen Block entkommentieren (anderer Port, anderer Name). Bei 32 Spielern braucht jeder Server
+  # gut 7 Mbit/s Upload (docs/architecture.md, Team Deathmatch).
+  #
+  # game-2:
+  #   image: ghcr.io/janhoeck/aos2-server:${IMAGE_TAG:-latest}
+  #   restart: unless-stopped
+  #   ports:
+  #     - "32888:32888/udp"
+  #   environment:
+  #     AOS2_OFFICIAL_KEY: ${OFFICIAL_SERVER_KEY:?OFFICIAL_SERVER_KEY fehlt}
+  #   command: [--name, "Ace of Spades 2 – Offiziell 2", --port, "32888", --site, "${SITE_URL}", --address, "${GAME_HOST}:32888"]
+  #   stop_grace_period: 10s

@@ -22,7 +22,7 @@ Weitere Optionen: `dotnet run --project server/AoS2.Server -- --help` (Port, Map
 
 1. Unity Hub → *Add* → Ordner `client/`, Projekt öffnen, Szene `Assets/Scenes/Game.unity`.
 2. *Play* drücken. Es erscheint das Startmenü.
-3. Name eintragen, Server `127.0.0.1:32887` lassen, Haken bei **Entwicklungs-Ticket** setzen (ohne Anmeldung über den Launcher ist er schon gesetzt), **Verbinden**.
+3. Reiter **Direkt verbinden** (seit M7; der Reiter **Server-Browser** zeigt die Server vom Backend, Abschnitt 4.1). Name eintragen, Server `127.0.0.1:32887` lassen, Haken bei **Entwicklungs-Ticket** setzen (ohne Anmeldung über den Launcher ist er schon gesetzt), **Verbinden**.
 4. Seit M6 erscheint das **Team-Menü**: Blau, Grün oder Automatisch wählen. Erst dann erscheint man im Spawn des Teams.
 
 ### 1.3 Zweiter Client: Windows-Build
@@ -120,7 +120,7 @@ Einstellungen kommen aus einer **Config-Datei** und von der **Kommandozeile**; d
 | Option | Eintrag in der Datei | Standard | Bedeutung |
 |---|---|---|---|
 | `--config <datei>` | – | – | Config-Datei (JSON, Abschnitt 3.1) |
-| – | `name` | `Ace of Spades 2` | Name des Servers (Log; ab M7 im Server-Browser) |
+| `--name <text>` | `name` | `Ace of Spades 2` | Name im Server-Browser, 1 bis 40 Zeichen |
 | `--port <zahl>` | `port` | 32887 | UDP-Port |
 | `--map <name>` | `map` | `testmap` | Map aus dem `maps`-Ordner, ohne `.aos2map` |
 | `--players-per-team <zahl>` | `playersPerTeam` | 16 | Spieler pro Team (1 bis 24); der Server nimmt doppelt so viele auf |
@@ -131,8 +131,10 @@ Einstellungen kommen aus einer **Config-Datei** und von der **Kommandozeile**; d
 | `--data <ordner>` | `data` | `data` neben der exe | `blocks.json`, `movement.json`, `player_rig.json`, `combat.json`, `weapons.json` |
 | `--maps <ordner>` | `maps` | `maps` neben der exe | Maps |
 | `--site <url>` | `site` | – | Adresse der Website; von dort holt der Server die öffentlichen Schlüssel für Join-Tickets (`/api/.well-known/jwks.json`) |
-| `--address <host:port>` | `address` | – | Adresse dieses Servers, wie Spieler sie eingeben. Steht im Ticket; Pflicht mit `site` |
-| `--dev` | `dev` | aus | Entwicklungsmodus (Abschnitt 2) |
+| `--address <host:port>` | `address` | – | Adresse dieses Servers, wie Spieler sie eingeben. Steht im Ticket und im Server-Browser; Pflicht mit `site`. Ohne Port gilt 32887; der Server schreibt sie klein (wie das Spiel ins Ticket) |
+| `--unlisted` | `listed` | `true` | Mit `site` im Server-Browser eintragen (Abschnitt 4.1); `false` bzw. `--unlisted` = nur per Adresse erreichbar |
+| `--dev` | `dev` | aus | Entwicklungsmodus (Abschnitt 2); solche Server erscheinen nie im Server-Browser |
+| – | – | – | Umgebungsvariable `AOS2_OFFICIAL_KEY`: Schlüssel offizieller Server ([backend.md](backend.md#46-offizielle-spielserver)) |
 
 Beim Bauen kopiert das Projekt `data/*.json`, `maps/*.aos2map` und `server.example.json` neben die exe; ohne Angabe nutzt der Server diese Kopien.
 
@@ -147,7 +149,7 @@ dotnet run --project server/AoS2.Server -- --config server.json
 - JSON mit `//`-Kommentaren; jeder Eintrag ist optional.
 - Unbekannte Einträge sind ein Fehler (gegen Tippfehler wie `scoreLimt`), ebenso Werte außerhalb des erlaubten Bereichs. Der Server nennt den Eintrag und startet nicht.
 - Relative Ordner in `data`/`maps` gelten relativ zur Config-Datei.
-- Das Format bleibt für Self-Hosting (M7) gleich; dann kommen nur Einträge dazu.
+- Seit M7 kamen nur Einträge dazu (`listed`); alte Config-Dateien gelten weiter. Für Self-Hoster: [self-hosting.md](self-hosting.md).
 
 ### 3.2 Was der Server ins Log schreibt
 
@@ -169,6 +171,25 @@ Status: 6 Spieler (Blau 3, Grün 3), Punkte 12 : 9, Tick Ø 0.08 ms / max 1.2 ms
 
 Abgelehnte Clients bekommen immer einen Grund (Protokoll, Ticket, voll, …), der im Startmenü steht.
 
+### 4.1 Server-Browser (seit M7)
+
+Mit `site` (und ohne `--dev`, `listed` nicht `false`) trägt sich der Server selbst im Server-Browser ein:
+
+1. Beim Start erzeugt er ein zufälliges **Geheimnis** (32 Byte, nur für diesen Prozess).
+2. Alle 30 s schickt er einen **Heartbeat** an `<site>/api/servers/heartbeat`: Adresse, Name, Map, Spieler, Plätze, Protokollversion, Version und das Geheimnis.
+3. Beim ersten Heartbeat (und nach einem Neustart, weil sich das Geheimnis ändert) schickt das Backend eine UDP-Abfrage mit einer Zufalls-Challenge an `address`. Der Server antwortet mit `HMAC-SHA256(Geheimnis, Challenge)`. Stimmt das, steht er in der Liste. Log: `Im Server-Browser eingetragen …`. Sonst `Server-Browser: nicht eingetragen. <Grund>. Neuer Versuch in 60 s.`
+4. Beim Beenden (`Strg+C`, `docker stop`) meldet er sich ab. Fällt er einfach aus, verschwindet er nach 90 s ohne Heartbeat aus der Liste.
+
+Dieselbe UDP-Abfrage (ohne Challenge) nutzt das Spiel für den **Ping**: Die Antwort enthält Name, Map, aktuelle Spieler und Plätze. Sie läuft über LiteNetLibs Nachrichten ohne Verbindung (`ServerQuery`/`ServerInfo` in `AoS2.Shared/Net/ServerQuery.cs`); der Server beantwortet höchstens 10 pro Sekunde und IP-Adresse. Einzelheiten und Schutz gegen Missbrauch: [architecture.md, Abschnitt 7](architecture.md#7-server-browser--self-hosting).
+
+**Lokal ausprobieren** (lokales Backend wie in 1.7; im Development-Modus nimmt das Backend auch Adressen wie `127.0.0.1` an):
+
+```powershell
+dotnet run --project server/AoS2.Server -- --site http://localhost:3000 --address 127.0.0.1:32887 --name "Mein Testserver"
+```
+
+Im Log erscheint `Im Server-Browser eingetragen`, im Spiel steht der Server im Reiter **Server-Browser** mit Ping. **Beitreten** holt ein Join-Ticket für genau die Adresse aus der Liste.
+
 ## 5. Wenn etwas schiefgeht
 
 | Problem | Ursache / Lösung |
@@ -182,6 +203,8 @@ Abgelehnte Clients bekommen immer einen Grund (Protokoll, Ticket, voll, …), de
 | Start: „Config-Datei …: unbekannter Eintrag …“ | Tippfehler in `server.json`. Erlaubte Einträge: Abschnitt 3. |
 | Team-Menü: Team ausgegraut | Das Team ist voll oder hätte dann mehr Spieler als das andere. **Automatisch** wählt das passende. |
 | Man kommt nicht weiter, ohne dass etwas zu sehen ist | Das ist die Spawnzone des Gegners (unsichtbare Wand). |
+| Log: „Server-Browser: nicht eingetragen …“ | Der Grund steht dabei; meist ist der Server von außen nicht erreichbar. Tabelle in [self-hosting.md](self-hosting.md#6-fehlersuche). |
+| Menü: „Serverliste nicht verfügbar: Das Spiel wurde ohne Launcher gestartet“ | Ohne Launcher (bzw. im Editor ohne gespeicherte Anmeldung) kennt das Spiel die Website nicht. **Direkt verbinden** geht trotzdem. |
 
 ## 6. Lasttest
 

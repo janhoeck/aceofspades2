@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AoS2.Shared\AoS2.Shared.csproj" />
+    <ProjectReference Include="..\AoS2.Contracts\AoS2.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

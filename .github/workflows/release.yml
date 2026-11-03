@@ -10,7 +10,7 @@ on:
     tags: ['v*.*.*']
 
 permissions:
-  contents: write # für das GitHub-Release mit der Setup.exe
+  contents: write # für das GitHub-Release mit Setup.exe und Server-Downloads
 
 concurrency:
   group: release
@@ -43,10 +43,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true # Tests laden die echte Map (maps/*.aos2map liegt in Git LFS)
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
       - run: dotnet test AoS2.slnx --configuration Release
+
+  # Das GitHub-Release zuerst leer anlegen; Launcher und Server laden ihre Dateien danach hinein.
+  github-release:
+    name: GitHub-Release anlegen
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" --verify-tag \
+            --title "Ace of Spades 2 ${{ needs.version.outputs.version }}" --generate-notes
 
   game:
     name: Spiel bauen und hochladen
@@ -100,7 +115,7 @@ jobs:
 
   launcher:
     name: Launcher paketieren und hochladen
-    needs: [version, test]
+    needs: [version, test, github-release]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -119,14 +134,63 @@ jobs:
         run: ./tools/release/pack-launcher.ps1 -Version ${{ needs.version.outputs.version }} -UpdateUrl "${{ vars.UPDATE_BASE_URL }}" -SiteUrl "${{ vars.SITE_URL }}" -Upload
 
       # Bequemer Download-Link für neue Spieler. Der Launcher selbst aktualisiert sich über R2.
-      - name: GitHub-Release mit Setup.exe
+      - name: Setup.exe ins GitHub-Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" `
-            "artifacts/release/launcher/AoS2.Launcher-win-Setup.exe#AoS2-Setup.exe" `
-            --title "Ace of Spades 2 ${{ needs.version.outputs.version }}" --generate-notes
+          gh release upload "${{ github.ref_name }}" --clobber `
+            "artifacts/release/launcher/AoS2.Launcher-win-Setup.exe#AoS2-Setup.exe"
+
+  server:
+    name: Server-Downloads (Windows, Linux) ins GitHub-Release
+    needs: [version, test, github-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true # die Map gehört in den Download
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Self-contained bauen und packen
+        shell: pwsh
+        run: ./tools/release/pack-server.ps1 -Version ${{ needs.version.outputs.version }}
+
+      - name: Ins GitHub-Release hochladen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" --clobber artifacts/release/server/*
+
+  server-image:
+    name: Server-Image veröffentlichen (amd64 + arm64)
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      # Buildx kann mehrere Plattformen in ein Image packen. Das Dockerfile übersetzt für arm64 ohne Emulation.
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Bei ghcr.io anmelden
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Image bauen und hochladen
+        shell: bash
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/aos2-server"
+          version="${{ needs.version.outputs.version }}"
+          docker buildx build --file deploy/server.Dockerfile --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION="$version" \
+            --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
+            --tag "$image:$version" --tag "$image:latest" --push .
 
   images:
     name: Images veröffentlichen (${{ matrix.name }})
@@ -155,14 +219,29 @@ jobs:
           docker push --all-tags "$image"
 
   deploy:
-    name: Website und Backend auf Coolify aktualisieren
-    needs: images
+    name: Website, Backend und offizielle Server auf Coolify aktualisieren
+    needs: [images, server-image]
     # Erst einschalten, wenn Coolify eingerichtet ist (Variable COOLIFY_ENABLED = true, Secrets siehe docs/backend.md).
     if: vars.COOLIFY_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
+      # Als Block (|): In einer Zeile ohne Anführungszeichen hielte YAML das ": " in "Authorization: Bearer" für einen
+      # neuen Schlüssel, und die ganze Datei wäre ungültig.
       - name: Redeploy über den Coolify-Webhook auslösen
         env:
           COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-        run: curl --fail --silent --show-error --header "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_WEBHOOK"
+        run: |
+          curl --fail --silent --show-error --header "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_WEBHOOK"
+
+      # Die offiziellen Spielserver sind eine eigene Coolify-Ressource mit eigenem Webhook (docs/backend.md, Abschnitt 4.6).
+      - name: Redeploy der offiziellen Spielserver
+        env:
+          COOLIFY_SERVER_WEBHOOK: ${{ secrets.COOLIFY_SERVER_WEBHOOK }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_SERVER_WEBHOOK" ]; then
+            echo "Secret COOLIFY_SERVER_WEBHOOK fehlt: offizielle Spielserver werden nicht neu gestartet."
+            exit 0
+          fi
+          curl --fail --silent --show-error --header "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_SERVER_WEBHOOK"

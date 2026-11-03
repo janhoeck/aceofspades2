@@ -12,7 +12,7 @@ Anleitung für den ersten richtigen Playtest (M6): Du startest einen Server auf 
 | Was jeder braucht | die ZIP-Datei | Launcher + Discord-Konto + die aktuelle Spielversion im Launcher |
 | Risiko | Wer Adresse und Port kennt, kann mit beliebigem Namen beitreten | keins (nur angemeldete Spieler, echter Discord-Name) |
 
-**Warum Weg A zuerst:** Für Weg B muss die Spielversion mit M6 über den Release-Workflow in den Launcher kommen, und der schlägt seit M2.1 fehl (eigenes Thema). Weg A braucht davon nichts. Der Entwicklungsmodus ist für einen Abend mit Freunden in Ordnung: Ein Fremder müsste deine Adresse kennen und könnte höchstens mitspielen. Danach den Server beenden und die Portfreigabe wieder schließen.
+**Warum Weg A zuerst:** Für Weg B muss die aktuelle Spielversion über den Release-Workflow in den Launcher kommen (der Workflow läuft seit M7 wieder, braucht aber die Einrichtung aus [release.md](release.md)). Weg A braucht davon nichts. Mit Weg B steht der Server außerdem im Server-Browser ([self-hosting.md](self-hosting.md)). Der Entwicklungsmodus ist für einen Abend mit Freunden in Ordnung: Ein Fremder müsste deine Adresse kennen und könnte höchstens mitspielen. Danach den Server beenden und die Portfreigabe wieder schließen.
 
 **Wichtig für beide Wege:** Alle brauchen **genau dieselbe Version** wie der Server (Protokoll 3 und dieselbe `testmap.aos2map`). Sonst meldet das Spiel „Spiel und Server passen nicht zusammen“ oder „Die Map … ist eine andere Version“. Server und Spiel also aus demselben Stand des Repositorys bauen.
 
@@ -109,7 +109,7 @@ Viele Kabel- und Glasfaser-Anschlüsse haben **DS-Lite**: Man teilt sich eine IP
 1. Build erstellen: Unity-Editor, Projekt `client/` → Menü **AoS2 → Windows-Build erstellen**. Ergebnis: `client/Builds/StandaloneWindows64/`.
 2. Den ganzen Ordner `StandaloneWindows64` als ZIP packen und deinen Freunden schicken (z. B. als Cloud-Link; das ZIP ist zu groß für die meisten Mail-Anhänge).
 3. Deine Freunde entpacken das ZIP und starten `AoS2.exe`. Windows warnt, weil das Spiel nicht signiert ist: *Weitere Informationen → Trotzdem ausführen*.
-4. Im Startmenü: **Name** eintragen, **Server** = deine Adresse (z. B. `203.0.113.5:32887`), Haken bei **Entwicklungs-Ticket** (ohne Launcher ist er schon gesetzt), **Verbinden**.
+4. Im Startmenü Reiter **Direkt verbinden**: **Name** eintragen, **Server** = deine Adresse (z. B. `203.0.113.5:32887`), Haken bei **Entwicklungs-Ticket** (ohne Launcher ist er schon gesetzt), **Verbinden**.
 5. Team wählen, los. Alternativ direkt per Verknüpfung: `AoS2.exe -connect 203.0.113.5:32887 -name Max -devticket`.
 
 ### Weg B: Launcher mit Discord-Anmeldung
@@ -117,7 +117,7 @@ Viele Kabel- und Glasfaser-Anschlüsse haben **DS-Lite**: Man teilt sich eine IP
 Voraussetzungen (alles aus [backend.md](backend.md) und [release.md](release.md)): Website und Backend laufen, die Discord-Anmeldung funktioniert, die Spielversion mit M6 ist über den Release-Workflow im Update-Speicher, und der Server-Rechner erreicht die Website (beim Start holt er dort die Schlüssel für die Join-Tickets).
 
 1. Deine Freunde installieren den Launcher (`AoS2.Launcher-win-Setup.exe`), melden sich mit Discord an und lassen das Spiel aktualisieren.
-2. **Spielen** → im Startmenü als Server **genau** die Adresse aus `"address"` eintragen (mit Port), Haken bei Entwicklungs-Ticket **aus**, **Verbinden**.
+2. **Spielen** → im Reiter **Server-Browser** deinen Server doppelklicken (er steht dort, sobald dein Server-Log `Im Server-Browser eingetragen` zeigt). Oder unter **Direkt verbinden** **genau** die Adresse aus `"address"` eintragen (mit Port), Haken bei Entwicklungs-Ticket **aus**, **Verbinden**.
 3. Kommt „Das Join-Ticket ist ungültig …“, passt die eingegebene Adresse nicht zu `"address"`: Das Backend stellt das Ticket genau für die eingegebene Adresse aus, und der Server nimmt nur Tickets für seine eigene Adresse an.
 
 ## 5. Am Playtest-Abend

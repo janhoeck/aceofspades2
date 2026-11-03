@@ -3,6 +3,7 @@
     "rootNamespace": "AoS2.Net",
     "references": [
         "AoS2.Shared",
+        "AoS2.Contracts",
         "LiteNetLib"
     ],
     "includePlatforms": [],

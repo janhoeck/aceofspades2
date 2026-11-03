@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using AoS2.JoinTickets;
 using AoS2.Shared;
 using AoS2.Shared.Net;
@@ -17,20 +18,35 @@ namespace AoS2.Server;
 /// Passt die Version nicht, lehnt der Server sofort ab. Das Ticket wird im Hintergrund geprüft; erst danach nimmt er
 /// die Verbindung an. Abgelehnte Clients bekommen eine <see cref="DisconnectNotice"/> mit dem Grund.
 /// </para>
+/// <para>
+/// Ohne Verbindung beantwortet er <see cref="ServerQuery"/>-Anfragen (Server-Browser: Ping und Spielerzahl; Backend:
+/// Erreichbarkeitsprüfung mit <see cref="ServerProof"/>).
+/// </para>
 /// Alle LiteNetLib-Ereignisse laufen über <see cref="Update"/> im Thread der Hauptschleife, die Simulation also nie parallel.
 /// </summary>
 public sealed class GameServer : INetEventListener, IMatchOutput, IDisposable
 {
+    /// <summary>Höchstens so viele Antworten auf Abfragen pro Sekunde an dieselbe IP (ein Server-Browser fragt einmal pro Aktualisierung).</summary>
+    public const int MaxQueriesPerIpPerSecond = 10;
+
+    /// <summary>Höchstens so viele Antworten pro Sekunde insgesamt.</summary>
+    public const int MaxQueriesPerSecond = 500;
+
     private readonly TicketCheck _tickets;
     private readonly ILogger _log;
     private readonly NetManager _net;
     private readonly Dictionary<byte, NetPeer> _peers = new();
     private readonly ConcurrentQueue<(ConnectionRequest Request, JoinTicket? Ticket)> _validated = new();
+    private readonly Dictionary<IPAddress, int> _queriesThisSecond = new();
+    private int _queriesTotalThisSecond;
+    private long _querySecond;
     private int _pendingJoins;
+    private int _playerCount;
 
-    public GameServer(GameContent content, MatchSettings settings, TicketCheck tickets, ILogger log)
+    public GameServer(GameContent content, MatchSettings settings, TicketCheck tickets, ILogger log, string name = "Ace of Spades 2")
     {
         Match = new Match(content, this, log, settings);
+        Name = name;
         _tickets = tickets;
         _log = log;
         _net = new NetManager(this)
@@ -40,10 +56,23 @@ public sealed class GameServer : INetEventListener, IMatchOutput, IDisposable
             UpdateTime = 5,
             ChannelsCount = 1,
             EnableStatistics = true, // Bytes und Pakete auf der Leitung (Log, Lasttest)
+            UnconnectedMessagesEnabled = true, // Server-Abfragen (Ping, Erreichbarkeitsprüfung)
         };
     }
 
     public Match Match { get; }
+
+    /// <summary>Name im Server-Browser.</summary>
+    public string Name { get; }
+
+    /// <summary>
+    /// Zufälliges Geheimnis dieses Serverprozesses. Geht per Heartbeat (HTTPS) an das Backend; mit ihm beantwortet der Server
+    /// die Challenge der Erreichbarkeitsprüfung (<see cref="ServerProof"/>).
+    /// </summary>
+    public byte[] Secret { get; } = RandomNumberGenerator.GetBytes(ServerListing.SecretBytes);
+
+    /// <summary>Spieler auf dem Server. Darf von anderen Threads gelesen werden (Heartbeat).</summary>
+    public int PlayerCount => Volatile.Read(ref _playerCount);
 
     /// <summary>Tick-Dauer und verschickte Daten (für das Log und den Lasttest).</summary>
     public ServerStats Stats { get; set; } = new();
@@ -82,6 +111,7 @@ public sealed class GameServer : INetEventListener, IMatchOutput, IDisposable
             _pendingJoins--;
             CompleteJoin(join.Request, join.Ticket);
         }
+        Volatile.Write(ref _playerCount, Match.Players.Count);
     }
 
     /// <summary>Alle Verbindungen mit Begründung trennen und den Port schließen.</summary>
@@ -221,8 +251,49 @@ public sealed class GameServer : INetEventListener, IMatchOutput, IDisposable
     void INetEventListener.OnNetworkError(IPEndPoint endPoint, SocketError socketError) =>
         _log.LogDebug("Netzwerkfehler {Error} ({Address})", socketError, endPoint);
 
+    // ---- Abfragen ohne Verbindung (Server-Browser, Backend) ----
+
     void INetEventListener.OnNetworkReceiveUnconnected(IPEndPoint remoteEndPoint, NetPacketReader reader, UnconnectedMessageType messageType)
     {
+        if (messageType != UnconnectedMessageType.BasicMessage || !AllowQuery(remoteEndPoint.Address)) return;
+        ServerQuery query;
+        try
+        {
+            query = ServerQuery.Read(reader.RawData, reader.Position, reader.AvailableBytes);
+        }
+        catch (ProtocolException)
+        {
+            return; // fremdes Programm: keine Antwort
+        }
+
+        var info = new ServerInfo
+        {
+            Nonce = query.Nonce,
+            ProtocolVersion = ProtocolInfo.Version,
+            Proof = query.Challenge != null ? ServerProof.Compute(Secret, query.Challenge) : null,
+            Name = Name,
+            Map = Match.Content.MapName,
+            Players = Match.Players.Count,
+            MaxPlayers = Match.Settings.MaxPlayers,
+        };
+        _net.SendUnconnectedMessage(info.ToBytes(), remoteEndPoint);
+    }
+
+    /// <summary>Begrenzt Antworten pro Sekunde (je IP und insgesamt), damit niemand den Server als Paketschleuder nutzt.</summary>
+    private bool AllowQuery(IPAddress address)
+    {
+        var second = Environment.TickCount64 / 1000;
+        if (second != _querySecond)
+        {
+            _querySecond = second;
+            _queriesThisSecond.Clear();
+            _queriesTotalThisSecond = 0;
+        }
+        _queriesThisSecond.TryGetValue(address, out var count);
+        if (count >= MaxQueriesPerIpPerSecond || _queriesTotalThisSecond >= MaxQueriesPerSecond) return false;
+        _queriesThisSecond[address] = count + 1;
+        _queriesTotalThisSecond++;
+        return true;
     }
 
     void INetEventListener.OnNetworkLatencyUpdate(NetPeer peer, int latency)

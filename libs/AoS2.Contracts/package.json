@@ -2,6 +2,6 @@
   "name": "com.aos2.contracts",
   "version": "0.0.0",
   "displayName": "AoS2 Contracts",
-  "description": "Datenformate der Backend-API (Anmeldung, Konto, Join-Tickets).",
+  "description": "Datenformate der Backend-API (Anmeldung, Konto, Join-Tickets, Server-Browser).",
   "unity": "6000.0"
 }

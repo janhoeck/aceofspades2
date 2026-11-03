@@ -9,7 +9,7 @@ Zwei Dienste, eine Adresse (z. B. `https://aos2.deine-domain.de`):
 | Dienst | Technik | Aufgabe |
 |---|---|---|
 | **Website** (`web/`) | Next.js 16 (App Router, TypeScript, Tailwind) | Startseite, alle Seiten der Anmeldung im Browser, reicht `/api/*` an das Backend durch |
-| **Backend** (`backend/AoS2.Backend`) | ASP.NET Core, PostgreSQL über EF Core | Konten, Discord-Tausch (mit Client-Secret), Sitzungen, Join-Tickets |
+| **Backend** (`backend/AoS2.Backend`) | ASP.NET Core, PostgreSQL über EF Core | Konten, Discord-Tausch (mit Client-Secret), Sitzungen, Join-Tickets, Server-Browser |
 
 Öffentlich erreichbar ist nur die Website. Launcher, Spiel und Spielserver kennen nur ihre Adresse; die API liegt darunter unter `/api`.
 
@@ -23,6 +23,9 @@ Zwei Dienste, eine Adresse (z. B. `https://aos2.deine-domain.de`):
 | `GET /api/me` | Launcher, Spiel | Eigenes Konto (Name, Profilbild) |
 | `POST /api/join-tickets` | Spiel (ab M4) | Kurzlebiges Ticket für einen bestimmten Spielserver |
 | `GET /api/.well-known/jwks.json` | Spielserver (ab M4) | Öffentlicher Schlüssel zum Prüfen der Tickets |
+| `GET /api/servers?protocol=3` | Spiel (ab M7) | Serverliste für den Server-Browser, öffentlich |
+| `POST /api/servers/heartbeat` | Spielserver (ab M7) | Heartbeat; beim ersten prüft das Backend die Erreichbarkeit per UDP |
+| `POST /api/servers/remove` | Spielserver (ab M7) | Abmelden beim Beenden |
 | `GET /api/health` | Launcher, Coolify | Laufen Website, Backend und Datenbank? |
 | `POST /api/internal/login/…` | nur die Website | Interne Login-API, mit gemeinsamem Schlüssel; die Website reicht sie nicht durch |
 
@@ -206,11 +209,12 @@ Kommt in Coolify in `INTERNAL_API_KEY` (4.4); Website und Backend lesen ihn beid
    | `DISCORD_CLIENT_ID` | aus 4.1 |
    | `DISCORD_CLIENT_SECRET` | aus 4.1 |
    | `JOIN_TICKET_SIGNING_KEY` | aus 4.2 |
+   | `OFFICIAL_SERVER_KEY` | optional, aus 4.6; leer lassen, solange es keine offiziellen Spielserver gibt |
 
 3. Nur beim Dienst `web` die **Domain** eintragen, z. B. `https://aos2.deine-domain.de:3000` (Coolify-Schreibweise: Domain plus Container-Port). Der Dienst `backend` bekommt keine Domain. Der DNS-Eintrag der Domain muss auf den Coolify-Server zeigen; das HTTPS-Zertifikat holt Coolify selbst.
 4. **Deploy**. Danach muss `https://aos2.deine-domain.de/api/health` im Browser `ok` zeigen, und `https://aos2.deine-domain.de` die Startseite.
 
-**Images:** Die CI legt die Images bei jedem Release unter `ghcr.io/janhoeck/aos2-web` und `ghcr.io/janhoeck/aos2-backend` ab (Abschnitt 4.5). Nach dem ersten Release auf GitHub unter **Profil → Packages → (jeweiliges Package) → Package settings → Change visibility → Public** stellen, sonst kann Coolify sie nicht ohne Zugangsdaten laden.
+**Images:** Die CI legt die Images bei jedem Release unter `ghcr.io/janhoeck/aos2-web`, `ghcr.io/janhoeck/aos2-backend` und `ghcr.io/janhoeck/aos2-server` (Spielserver, ab M7) ab (Abschnitt 4.5). Nach dem ersten Release auf GitHub unter **Profil → Packages → (jeweiliges Package) → Package settings → Change visibility → Public** stellen, sonst kann Coolify sie nicht ohne Zugangsdaten laden.
 
 **Redeploy per Webhook** (damit die CI nach einem Release neu startet):
 
@@ -228,10 +232,41 @@ Zusätzlich zu [release.md](release.md#22-github-secrets-und-variablen), im Repo
 | Variable | `COOLIFY_ENABLED` | `true`, sobald die beiden Secrets eingetragen sind |
 | Secret | `COOLIFY_WEBHOOK` | Deploy-Webhook-URL aus 4.4 |
 | Secret | `COOLIFY_TOKEN` | API-Token aus 4.4 |
+| Secret | `COOLIFY_SERVER_WEBHOOK` | optional: Deploy-Webhook der offiziellen Spielserver (4.6) |
 
 Für die Images braucht es kein Secret; die CI nutzt das automatische `GITHUB_TOKEN`.
 
-Ablauf bei einem Release-Tag (`.github/workflows/release.yml`): Tests → beide Images bauen und nach ghcr.io hochladen (`:0.2.0` und `:latest`) → Coolify-Webhook → Coolify lädt die neuen Images und startet neu; fehlende Migrationen spielt das Backend beim Start ein. Der Launcher wird mit `SITE_URL` gebaut. Bei jedem Pull Request prüft `.github/workflows/web.yml` die Website (Lint, Tests, Build, Docker-Build), `dotnet.yml` baut das Backend-Image testweise.
+Ablauf bei einem Release-Tag (`.github/workflows/release.yml`): Tests → Images bauen und nach ghcr.io hochladen (`:0.2.0` und `:latest`) → Coolify-Webhooks → Coolify lädt die neuen Images und startet neu; fehlende Migrationen spielt das Backend beim Start ein. Der Launcher wird mit `SITE_URL` gebaut. Bei jedem Pull Request prüft `.github/workflows/web.yml` die Website (Lint, Tests, Build, Docker-Build), `dotnet.yml` baut das Backend-Image testweise.
+
+### 4.6 Offizielle Spielserver
+
+Offizielle Server sind normale Spielserver aus dem Docker-Image `aos2-server`, die mit einem geheimen Schlüssel ausgewiesen sind. Im Server-Browser stehen sie oben, tragen einen Stern und zählen nicht zur Grenze von 8 Servern pro IP-Adresse. Die Compose-Datei ist `deploy/game-servers.compose.yml`, eine **eigene Ressource** neben Website und Backend: Ein Redeploy der Website soll keine laufenden Matches beenden.
+
+Schritt für Schritt:
+
+1. **Schlüssel erzeugen** (wie in 4.3, ein langer Zufallswert):
+   ```powershell
+   -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+   ```
+   In Coolify bei der Ressource von Website und Backend als `OFFICIAL_SERVER_KEY` eintragen und diese neu deployen. Das Backend kennt den Schlüssel dann als `ServerBrowser:OfficialKey`.
+2. **Port in der Firewall des Coolify-Servers öffnen:** UDP 32887 (und für jeden weiteren Spielserver dessen Port), z. B. `sudo ufw allow 32887/udp`, bei Hetzner & Co. zusätzlich in der Firewall der Weboberfläche. Der Coolify-Proxy hilft hier nicht: Er leitet nur HTTP weiter, Spieler kommen per UDP direkt auf den Container.
+3. **Adresse festlegen:** öffentliche IP-Adresse des Coolify-Servers oder ein DNS-Eintrag darauf, z. B. `play.aos2.deine-domain.de` (A-Record auf die IP, ohne Proxy wie Cloudflares orange Wolke, die kein UDP weiterleitet).
+4. In Coolify **+ New → Docker Compose** aus diesem Repository, Branch `main`, Compose-Datei `deploy/game-servers.compose.yml`.
+5. **Environment Variables:**
+
+   | Variable | Wert |
+   |---|---|
+   | `SITE_URL` | dieselbe wie bei Website und Backend |
+   | `GAME_HOST` | Adresse aus 3., ohne Port |
+   | `OFFICIAL_SERVER_KEY` | derselbe Schlüssel wie in 1. |
+   | `GAME_1_NAME` | optional, Name im Browser (Standard „Ace of Spades 2 – Offiziell 1“) |
+   | `GAME_1_PORT`, `GAME_1_MAP` | optional (Standard 32887 und `testmap`) |
+
+6. **Keine Domain** eintragen. **Deploy**. Im Log des Containers muss nach wenigen Sekunden `Im Server-Browser eingetragen … als offizieller Server` stehen. Kommt „nicht erreichbar“: Schritt 2 und 3 prüfen.
+7. Damit die CI die Spielserver nach einem Release neu startet: bei dieser Ressource unter **Webhooks** die Deploy-Webhook-URL kopieren und in GitHub als Secret `COOLIFY_SERVER_WEBHOOK` eintragen (4.5). Der API-Token aus 4.4 gilt auch hier.
+8. Nach dem ersten Release das Package `aos2-server` auf ghcr.io öffentlich stellen (wie in 4.4 bei den Images beschrieben). Das hilft auch Self-Hostern, die das Image ohne Anmeldung laden wollen.
+
+Weitere Server: in der Compose-Datei den auskommentierten Block `game-2` aktivieren (eigener Port, Schritt 2 für diesen Port wiederholen). Jeder Server mit 32 Spielern braucht gut 7 Mbit/s Upload.
 
 ## 5. Konfiguration
 
@@ -246,6 +281,11 @@ Ablauf bei einem Release-Tag (`.github/workflows/release.yml`): Tests → beide 
 | `Discord:UseDevLogin` | `Discord__UseDevLogin` | nur Development: Entwicklungs-Login statt Discord |
 | `JoinTickets:SigningKey` | `JoinTickets__SigningKey` | privater Schlüssel aus 4.2; in Development ohne Angabe ein zufälliger |
 | `Backend:MigrateOnStartup` | `Backend__MigrateOnStartup` | Standard `true` |
+| `ServerBrowser:OfficialKey` | `ServerBrowser__OfficialKey` | Schlüssel offizieller Spielserver (4.6), leer oder mindestens 32 Zeichen |
+| `ServerBrowser:MaxServersPerIp` | `ServerBrowser__MaxServersPerIp` | Community-Server pro IP-Adresse, Standard 8 |
+| `ServerBrowser:MaxProbesPerIp` | `ServerBrowser__MaxProbesPerIp` | Erreichbarkeitsprüfungen pro IP-Adresse in 10 Minuten, Standard 20 |
+| `ServerBrowser:HeartbeatSeconds` / `ExpirySeconds` | `ServerBrowser__HeartbeatSeconds` / `…__ExpirySeconds` | Heartbeat alle 30 s, ohne Heartbeat nach 90 s aus der Liste |
+| `ServerBrowser:AllowPrivateAddresses` | `ServerBrowser__AllowPrivateAddresses` | Server mit Adressen wie `127.0.0.1` zulassen; nur zum Testen, in Development an |
 
 **Website** (Umgebungsvariablen, zur Laufzeit gelesen):
 
@@ -298,4 +338,6 @@ Der Server prüft Signatur, Aussteller, Zielserver und Ablauf (30 Sekunden Toler
 | Spiel: „Anmeldung abgelaufen“ | Sitzung abgelaufen oder abgemeldet. Im Launcher neu anmelden. |
 | Spiel im Editor: „Nicht angemeldet“ | Noch nie im Launcher angemeldet, oder `AOS2_DATA_DIR` zeigt woanders hin. |
 | `dev-db.ps1`: initdb nicht gefunden | PostgreSQL installieren oder `C:\Program Files\PostgreSQL\<Version>\bin` in den PATH. |
+| Offizieller Server: „nicht erreichbar“ im Log | UDP-Port in der Firewall des Coolify-Servers zu, `GAME_HOST` zeigt nicht auf den Server, oder DNS über einen HTTP-Proxy (4.6). |
+| Offizieller Server: „Der Schlüssel für offizielle Server ist falsch“ | `OFFICIAL_SERVER_KEY` bei den beiden Ressourcen verschieden, oder das Backend wurde nach dem Eintragen nicht neu deployt. |
 | Coolify lädt die neuen Images nicht | Packages auf ghcr.io nicht öffentlich (4.4) oder Redeploy ohne Neuladen: In Coolify einmal von Hand „Redeploy“ auslösen und das Log prüfen. |

@@ -9,11 +9,14 @@ WORKDIR /src
 COPY global.json Directory.Build.props ./
 COPY libs/AoS2.Contracts/AoS2.Contracts.csproj libs/AoS2.Contracts/
 COPY libs/AoS2.JoinTickets/AoS2.JoinTickets.csproj libs/AoS2.JoinTickets/
+COPY libs/AoS2.Shared/AoS2.Shared.csproj libs/AoS2.Shared/
 COPY backend/AoS2.Backend/AoS2.Backend.csproj backend/AoS2.Backend/
 RUN dotnet restore backend/AoS2.Backend/AoS2.Backend.csproj
 
 COPY libs/AoS2.Contracts/ libs/AoS2.Contracts/
 COPY libs/AoS2.JoinTickets/ libs/AoS2.JoinTickets/
+# Für den Server-Browser: Format der UDP-Abfrage (Erreichbarkeitsprüfung der Spielserver).
+COPY libs/AoS2.Shared/ libs/AoS2.Shared/
 COPY backend/AoS2.Backend/ backend/AoS2.Backend/
 ARG VERSION=0.0.0
 RUN dotnet publish backend/AoS2.Backend/AoS2.Backend.csproj --configuration Release --no-restore \

@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using AoS2.Backend.Auth;
 using AoS2.Backend.Data;
+using AoS2.Backend.Servers;
 using AoS2.Contracts;
 using AoS2.JoinTickets;
 using Microsoft.AspNetCore.Hosting;
@@ -39,11 +40,13 @@ internal sealed class BackendApp : WebApplicationFactory<Program>
     private readonly Dictionary<string, string?> _settings;
     private readonly string _environment;
     private readonly bool _fakeDiscord;
+    private readonly bool _fakeProbe;
 
-    public BackendApp(Dictionary<string, string?>? settings = null, string environment = "Production", bool fakeDiscord = true)
+    public BackendApp(Dictionary<string, string?>? settings = null, string environment = "Production", bool fakeDiscord = true, bool fakeProbe = true)
     {
         _environment = environment;
         _fakeDiscord = fakeDiscord;
+        _fakeProbe = fakeProbe;
         _settings = new()
         {
             ["Backend:PublicUrl"] = PublicUrl,
@@ -59,6 +62,9 @@ internal sealed class BackendApp : WebApplicationFactory<Program>
     }
 
     public FakeDiscord Discord { get; } = new();
+
+    /// <summary>Statt der UDP-Erreichbarkeitsprüfung (außer mit <c>fakeProbe: false</c>).</summary>
+    public FakeServerProbe Probe { get; } = new();
     public FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero));
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -80,6 +86,12 @@ internal sealed class BackendApp : WebApplicationFactory<Program>
             {
                 services.RemoveAll<IDiscordClient>();
                 services.AddSingleton<IDiscordClient>(Discord);
+            }
+
+            if (_fakeProbe)
+            {
+                services.RemoveAll<IServerProbe>();
+                services.AddSingleton<IServerProbe>(Probe);
             }
         });
     }

@@ -15,6 +15,7 @@ Ein Team-Shooter (Blau gegen Grün) in einer vollständig zerstörbaren, blockar
 - [Website, Backend und Discord-Login](docs/backend.md) – Anmeldung, lokal entwickeln, Discord-App, Coolify
 - [Spielserver und Netzwerk](docs/server.md) – Server starten, Config-Datei, Entwicklungsmodus, zwei Clients lokal verbinden, Lasttest
 - [Playtest mit Freunden](docs/playtest.md) – Server im Internet freigeben (Port 32887/UDP), Freunde verbinden
+- [Eigenen Server hosten](docs/self-hosting.md) – Download oder Docker, Config, Portfreigabe, Server-Browser, Fehlersuche
 
 ## Aufbau des Repositories
 
@@ -74,7 +75,7 @@ Blocktypen stehen in `data/blocks.json`, Bewegungswerte in `data/movement.json`;
 dotnet run --project server/AoS2.Server -- --dev   # Server im Entwicklungsmodus, eigenes Terminal
 ```
 
-Dann im Editor *Play* und im Startmenü mit `127.0.0.1:32887` und Haken bei **Entwicklungs-Ticket** verbinden; ein Windows-Build (*AoS2 → Windows-Build erstellen*) ist der zweite Client. Ausführlich: [docs/server.md](docs/server.md).
+Dann im Editor *Play* und im Startmenü unter **Direkt verbinden** mit `127.0.0.1:32887` und Haken bei **Entwicklungs-Ticket** verbinden (der Reiter **Server-Browser** zeigt die öffentlichen Server mit Ping, wenn das Spiel über den Launcher läuft); ein Windows-Build (*AoS2 → Windows-Build erstellen*) ist der zweite Client. Ausführlich: [docs/server.md](docs/server.md).
 
 Nach dem Verbinden wählt man im **Team-Menü** Blau, Grün oder Automatisch; gespielt wird Team Deathmatch bis 50 Punkte. **M** öffnet das Team-Menü wieder, **Tab** zeigt die Punktetabelle. Server-Einstellungen (Punkteziel, Spieler pro Team, Zeitlimit, Teambeschuss) stehen in einer Config-Datei, Vorlage: `server/AoS2.Server/server.example.json`. Ausprobieren: [docs/server.md](docs/server.md#16-team-deathmatch-ausprobieren-seit-m6).
 

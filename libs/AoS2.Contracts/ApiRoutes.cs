@@ -22,6 +22,15 @@ namespace AoS2.Contracts
         public const string JoinTicketKeys = "/api/.well-known/jwks.json";
 
         public const string Health = "/api/health";
+
+        /// <summary>GET → <see cref="ServerListResponse"/>, öffentlich. Parameter <c>protocol</c>: nur Server mit dieser Protokollversion.</summary>
+        public const string Servers = "/api/servers";
+
+        /// <summary>POST <see cref="ServerHeartbeatRequest"/> → <see cref="ServerHeartbeatResponse"/> (Spielserver).</summary>
+        public const string ServerHeartbeat = "/api/servers/heartbeat";
+
+        /// <summary>POST <see cref="ServerRemoveRequest"/>: Spielserver meldet sich ab.</summary>
+        public const string ServerRemove = "/api/servers/remove";
     }
 
     /// <summary>Seiten der Website (<c>web/</c>), die der Launcher im Browser öffnet.</summary>

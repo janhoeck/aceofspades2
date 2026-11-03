@@ -13,6 +13,7 @@ public sealed class BackendDb(DbContextOptions<BackendDb> options) : DbContext(o
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<LoginAttempt> LoginAttempts => Set<LoginAttempt>();
+    public DbSet<ListedServer> ListedServers => Set<ListedServer>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -41,6 +42,19 @@ public sealed class BackendDb(DbContextOptions<BackendDb> options) : DbContext(o
             attempt.Property(a => a.CodeChallenge).HasMaxLength(64);
             attempt.Property(a => a.ExchangeCodeHash).HasMaxLength(64);
             attempt.HasOne<Account>().WithMany().HasForeignKey(a => a.AccountId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        model.Entity<ListedServer>(server =>
+        {
+            server.HasIndex(s => s.Address).IsUnique();
+            server.HasIndex(s => s.LastHeartbeatAt);
+            server.HasIndex(s => s.RegisteredFromIp);
+            server.Property(s => s.Address).HasMaxLength(ListedServer.MaxAddressLength);
+            server.Property(s => s.Name).HasMaxLength(64);
+            server.Property(s => s.Map).HasMaxLength(64);
+            server.Property(s => s.GameVersion).HasMaxLength(32);
+            server.Property(s => s.SecretHash).HasMaxLength(64);
+            server.Property(s => s.RegisteredFromIp).HasMaxLength(64);
         });
     }
 }
@@ -103,6 +117,39 @@ public sealed class LoginAttempt
     public Guid? AccountId { get; set; }
 
     public string? ExchangeCodeHash { get; set; }
+}
+
+/// <summary>
+/// Ein Spielserver im Server-Browser. Entsteht beim ersten Heartbeat, sobald die Erreichbarkeitsprüfung bestanden ist;
+/// jeder weitere Heartbeat aktualisiert ihn. Ohne Heartbeat zeigt die Liste ihn nach kurzer Zeit nicht mehr, später wird er gelöscht.
+/// </summary>
+public sealed class ListedServer
+{
+    public const int MaxAddressLength = 270; // Domainname (253) + [ ] : Port
+
+    public Guid Id { get; set; }
+
+    /// <summary>Adresse, wie Spieler sie eingeben (klein geschrieben, mit Port). Eindeutig.</summary>
+    public required string Address { get; set; }
+
+    public required string Name { get; set; }
+    public required string Map { get; set; }
+    public int Players { get; set; }
+    public int MaxPlayers { get; set; }
+    public int ProtocolVersion { get; set; }
+    public required string GameVersion { get; set; }
+
+    /// <summary>SHA-256 des Geheimnisses aus dem Heartbeat. Nur wer es kennt, kann den Eintrag ändern oder entfernen.</summary>
+    public required string SecretHash { get; set; }
+
+    /// <summary>Mit dem Schlüssel für offizielle Server angemeldet.</summary>
+    public bool Official { get; set; }
+
+    /// <summary>IP-Adresse, von der der Heartbeat kam (für die Grenze pro IP).</summary>
+    public required string RegisteredFromIp { get; set; }
+
+    public DateTime RegisteredAt { get; set; }
+    public DateTime LastHeartbeatAt { get; set; }
 }
 
 /// <summary>Für <c>dotnet ef</c>: erzeugt die Datenbank ohne den Rest des Backends (Konfiguration, Discord, …).</summary>

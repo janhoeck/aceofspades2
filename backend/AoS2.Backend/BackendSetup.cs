@@ -1,6 +1,7 @@
 using System.Threading.RateLimiting;
 using AoS2.Backend.Auth;
 using AoS2.Backend.Data;
+using AoS2.Backend.Servers;
 using AoS2.Contracts;
 using AoS2.JoinTickets;
 using Microsoft.AspNetCore.Authentication;
@@ -89,13 +90,19 @@ public static class BackendSetup
         services.AddAuthorization();
         services.AddProblemDetails();
 
-        // Pro IP höchstens 30 Login-Anfragen pro Minute. Ein normaler Login braucht drei.
+        services.AddServerBrowser(config, isDevelopment);
+
         services.AddRateLimiter(limiter =>
         {
             limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            // Pro IP höchstens 30 Login-Anfragen pro Minute. Ein normaler Login braucht drei.
             limiter.AddPolicy(RateLimits.Login, http => RateLimitPartition.GetFixedWindowLimiter(
                 http.Connection.RemoteIpAddress?.ToString() ?? "unbekannt",
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));
+            // Pro IP höchstens 60 Heartbeats pro Minute: reicht für die erlaubten Server pro IP mit Reserve für Neustarts.
+            limiter.AddPolicy(ServerEndpoints.HeartbeatRateLimit, http => RateLimitPartition.GetFixedWindowLimiter(
+                ServerEndpoints.ClientIp(http),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1) }));
         });
 
         // Coolify setzt einen Proxy (Traefik) davor. Er liefert die echte IP des Spielers in X-Forwarded-For.
@@ -130,6 +137,7 @@ public static class BackendSetup
             await db.Database.CanConnectAsync(cancellationToken) ? Results.Text("ok") : Results.StatusCode(503));
         app.MapLogin();
         app.MapAccount();
+        app.MapServerBrowser();
     }
 
     private static JoinTicketSigningKey LoadSigningKey(IConfiguration config, bool isDevelopment, ILoggerFactory loggers)

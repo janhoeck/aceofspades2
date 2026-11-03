@@ -36,6 +36,9 @@ services:
       Discord__ClientSecret: ${DISCORD_CLIENT_SECRET:?DISCORD_CLIENT_SECRET fehlt}
       # Einmal erzeugen: docker run --rm ghcr.io/janhoeck/aos2-backend generate-signing-key
       JoinTickets__SigningKey: ${JOIN_TICKET_SIGNING_KEY:?JOIN_TICKET_SIGNING_KEY fehlt}
+      # Server-Browser: Schlüssel, mit dem sich offizielle Spielserver ausweisen (deploy/game-servers.compose.yml).
+      # Leer lassen, solange es keine gibt.
+      ServerBrowser__OfficialKey: ${OFFICIAL_SERVER_KEY:-}
     healthcheck:
       test: ["CMD", "dotnet", "AoS2.Backend.dll", "healthcheck"]
       interval: 30s

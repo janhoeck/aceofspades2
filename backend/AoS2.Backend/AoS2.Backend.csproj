@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
+    <!-- Erreichbarkeitsprüfung der Spielserver (UDP-Abfrage wie im Spiel, siehe Servers/ServerProbe.cs). -->
+    <PackageReference Include="LiteNetLib" Version="2.1.4" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -22,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\libs\AoS2.Contracts\AoS2.Contracts.csproj" />
     <ProjectReference Include="..\..\libs\AoS2.JoinTickets\AoS2.JoinTickets.csproj" />
+    <ProjectReference Include="..\..\libs\AoS2.Shared\AoS2.Shared.csproj" />
   </ItemGroup>
 
 </Project>

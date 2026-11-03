@@ -1,10 +1,11 @@
-# Docker braucht nur die Quellen von Backend und Website (siehe deploy/*.Dockerfile).
+# Docker braucht nur die Quellen von Backend, Website und Spielserver (siehe deploy/*.Dockerfile).
+# Vom Spielserver kommen data/ und die gebauten Maps (maps/*.aos2map) mit, die Map-Quellen nicht.
 **/bin/
 **/obj/
 artifacts/
 client/
 assets-src/
-maps/
+maps/src/
 docs/
 .git/
 .github/

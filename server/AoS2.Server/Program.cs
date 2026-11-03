@@ -1,6 +1,7 @@
 using AoS2.Server;
 using AoS2.Shared;
 using AoS2.Shared.Maps;
+using AoS2.Shared.Net;
 using Microsoft.Extensions.Logging;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8; // Umlaute auch in der klassischen Windows-Konsole
@@ -37,6 +38,13 @@ Console.CancelKeyPress += (_, e) =>
     e.Cancel = true; // sauber herunterfahren statt sofort beenden
     stop.Cancel();
 };
+// docker stop schickt SIGTERM (kein Strg+C): ebenfalls sauber beenden und aus dem Server-Browser abmelden.
+using var sigterm = OperatingSystem.IsWindows() ? null : System.Runtime.InteropServices.PosixSignalRegistration.Create(
+    System.Runtime.InteropServices.PosixSignal.SIGTERM, context =>
+    {
+        context.Cancel = true;
+        stop.Cancel();
+    });
 
 if (options.DevMode)
 {
@@ -67,10 +75,10 @@ catch (Exception e) when (e is IOException or FormatException or InvalidDataExce
     return 1;
 }
 
-using var server = new GameServer(content, options.Match, tickets, log);
+using var server = new GameServer(content, options.Match, tickets, log, options.Name);
 var world = server.Match.World;
-log.LogInformation("\"{Name}\": Ace of Spades 2 Server, Protokoll {Protocol}, Map {Map} ({X} × {Y} × {Z}){Config}{Tickets}",
-    options.Name, ProtocolInfo.Version, content.MapName, world.SizeX, world.SizeY, world.SizeZ,
+log.LogInformation("\"{Name}\": Ace of Spades 2 Server {Version}, Protokoll {Protocol}, Map {Map} ({X} × {Y} × {Z}){Config}{Tickets}",
+    options.Name, Heartbeat.Version, ProtocolInfo.Version, content.MapName, world.SizeX, world.SizeY, world.SizeZ,
     options.ConfigFile != null ? $", Config {options.ConfigFile}" : "",
     options.SiteUrl != null ? $", Join-Tickets von {options.SiteUrl} für {options.Address}" : "");
 var rules = options.Match;
@@ -86,6 +94,26 @@ catch (InvalidOperationException e)
     log.LogError("{Message}", e.Message);
     return 1;
 }
+if (options.Address != null && ServerAddress.TryParse(options.Address, out var advertised) && advertised.Port != server.Port)
+    log.LogWarning("address nennt Port {Advertised}, der Server lauscht auf {Port}. Das stimmt nur, wenn der Router den einen auf den anderen weiterleitet.",
+        advertised.Port, server.Port);
+
+// Server-Browser: Heartbeat ans Backend, neben der Hauptschleife.
+using var browserHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+browserHttp.DefaultRequestHeaders.UserAgent.ParseAdd($"AoS2.Server/{Heartbeat.Version}");
+Heartbeat? heartbeat = null;
+Task heartbeatTask = Task.CompletedTask;
+if (options.SiteUrl == null)
+    log.LogInformation("Nicht im Server-Browser (ohne site). Spieler verbinden sich direkt über die Adresse.");
+else if (options.DevMode)
+    log.LogInformation("Nicht im Server-Browser: Server im Entwicklungsmodus werden nie gelistet.");
+else if (!options.Listed)
+    log.LogInformation("Nicht im Server-Browser (listed: false). Spieler verbinden sich direkt über {Address}.", options.Address);
+else
+{
+    heartbeat = new Heartbeat(browserHttp, options.SiteUrl, server, options.Address!, Environment.GetEnvironmentVariable(Heartbeat.OfficialKeyVariable), log);
+    heartbeatTask = Task.Run(() => heartbeat.RunAsync(stop.Token));
+}
 
 // Jede Minute eine Zeile zum Zustand: Spieler, Punkte, wie lange ein Tick rechnet und wie viel der Server verschickt.
 const double reportSeconds = 60;
@@ -100,5 +128,11 @@ ServerLoop.Run(server, stop.Token, () =>
     s.Reset();
 }, reportSeconds);
 log.LogInformation("Server wird beendet …");
+await heartbeatTask;
+if (heartbeat != null)
+{
+    using var removeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+    await heartbeat.RemoveAsync(removeTimeout.Token);
+}
 server.Stop();
 return 0;

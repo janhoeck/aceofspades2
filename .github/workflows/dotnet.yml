@@ -20,8 +20,10 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
 
     steps:
-      # Ohne LFS: Der .NET-Build braucht keine Texturen oder Modelle.
+      # Mit LFS: Tests laden die echte Map (maps/*.aos2map liegt in Git LFS, ohne LFS stünde dort nur ein Verweis).
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -51,3 +53,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Docker-Build
         run: docker build --file deploy/backend.Dockerfile --tag aos2-backend:test .
+
+  server-image:
+    name: Server-Image bauen und starten (ohne Hochladen)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Docker-Build
+        run: docker build --file deploy/server.Dockerfile --tag aos2-server:test .
+      # Startet der Server im Container (Spieldaten und Map gefunden, UDP-Port offen)?
+      - name: Probestart
+        run: |
+          mkdir -p config
+          echo '{ "name": "CI", "dev": true }' > config/server.json
+          docker run -d --name aos2-server -v "$PWD/config:/config:ro" aos2-server:test
+          for i in $(seq 1 20); do
+            if docker logs aos2-server 2>&1 | grep -q "lauscht auf UDP-Port 32887"; then docker logs aos2-server; docker rm -f aos2-server; exit 0; fi
+            sleep 1
+          done
+          docker logs aos2-server; exit 1

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AoS2.Shared;
+using AoS2.Shared.Net;
 
 namespace AoS2.Server;
 
@@ -17,7 +18,7 @@ public sealed class ServerOptions
     public const int MaxPlayersLimit = 48;
     public const int MaxPlayersPerTeam = MaxPlayersLimit / 2;
 
-    /// <summary>Name des Servers (Anzeige; ab M7 im Server-Browser).</summary>
+    /// <summary>Name des Servers im Server-Browser (Regeln: <see cref="ServerListing.IsValidName"/>).</summary>
     public string Name { get; init; } = "Ace of Spades 2";
 
     public int Port { get; init; } = ProtocolInfo.DefaultPort;
@@ -39,8 +40,14 @@ public sealed class ServerOptions
     /// <summary>Adresse der Website (Aussteller der Join-Tickets, öffentliche Schlüssel unter <c>/api/.well-known/jwks.json</c>).</summary>
     public string? SiteUrl { get; init; }
 
-    /// <summary>Adresse dieses Servers, wie Spieler sie eingeben (z. B. <c>play.example.org:32887</c>). Steht im Ticket.</summary>
+    /// <summary>
+    /// Adresse dieses Servers, wie Spieler sie eingeben (z. B. <c>play.example.org:32887</c>). Steht im Ticket und im
+    /// Server-Browser. Immer mit Port und klein geschrieben, so wie der Client sie ins Ticket schreibt.
+    /// </summary>
     public string? Address { get; init; }
+
+    /// <summary>Mit <see cref="SiteUrl"/>: per Heartbeat im Server-Browser eintragen (Standard). <c>false</c> = nur per Adresse erreichbar.</summary>
+    public bool Listed { get; init; } = true;
 
     /// <summary>
     /// <b>Entwicklungsmodus</b> (<c>--dev</c>): Der Server nimmt zusätzlich Entwicklungs-Tickets an, die jeder Client ohne
@@ -56,6 +63,7 @@ public sealed class ServerOptions
 
         Optionen (gelten vor den Werten aus der Config-Datei):
           --config <datei>            Config-Datei (JSON, Vorlage: server.example.json neben der exe)
+          --name <text>               Name im Server-Browser (höchstens 40 Zeichen)
           --port <zahl>               UDP-Port (Standard 32887)
           --map <name>                Map aus dem maps-Ordner, ohne .aos2map (Standard testmap)
           --players-per-team <zahl>   Spieler pro Team (Standard 16, höchstens 24)
@@ -64,11 +72,13 @@ public sealed class ServerOptions
           --maps <ordner>             Maps (Standard: maps neben der exe)
           --site <url>                Adresse der Website; der Server prüft Join-Tickets mit ihren öffentlichen Schlüsseln
           --address <host:port>       Adresse dieses Servers, wie Spieler sie eingeben (gehört ins Ticket)
+          --unlisted                  nicht im Server-Browser anzeigen (nur per Adresse erreichbar)
           --dev                       ENTWICKLUNGSMODUS: nimmt auch Entwicklungs-Tickets an, die jeder fälschen kann.
                                       Nur zum lokalen Testen, nie für öffentliche Server.
           --help                      diese Hilfe
 
-        Nur in der Config-Datei: name, timeLimitMinutes, matchEndSeconds, friendlyFire.
+        Nur in der Config-Datei: timeLimitMinutes, matchEndSeconds, friendlyFire, listed.
+        Offizielle Server: Umgebungsvariable AOS2_OFFICIAL_KEY.
         """;
 
     /// <summary>Liest Config-Datei und Kommandozeile. Wirft <see cref="ArgumentException"/> mit verständlicher Meldung.</summary>
@@ -90,6 +100,7 @@ public sealed class ServerOptions
             switch (arg)
             {
                 case "--config": Value(); break; // schon gelesen
+                case "--name": v.Name = Value(); break;
                 case "--port": v.Port = ParseInt(arg, Value(), 1, 65535); break;
                 case "--map": v.Map = Value(); break;
                 case "--players-per-team": v.PlayersPerTeam = ParseInt(arg, Value(), 1, MaxPlayersPerTeam); break;
@@ -98,6 +109,7 @@ public sealed class ServerOptions
                 case "--maps": v.Maps = Value(); break;
                 case "--site": v.Site = Value(); break;
                 case "--address": v.Address = Value(); break;
+                case "--unlisted": v.Listed = false; break;
                 case "--dev": v.Dev = true; break;
                 default: throw new ArgumentException($"Unbekannte Option {arg}. Hilfe: --help");
             }
@@ -110,8 +122,19 @@ public sealed class ServerOptions
             throw new ArgumentException("Mit site braucht der Server auch address (so steht er in den Join-Tickets).");
         if (site == null && !v.Dev)
             throw new ArgumentException("Ohne site (--site oder in der Config) kann der Server keine Join-Tickets prüfen. Zum lokalen Testen: --dev");
-        if (v.Map.Length == 0 || v.Map.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || v.Map.Contains(".."))
-            throw new ArgumentException("map ist ein Name ohne Pfad und ohne Endung.");
+        if (!ServerListing.IsValidMap(v.Map))
+            throw new ArgumentException("map ist ein Name ohne Pfad und ohne Endung (Buchstaben, Ziffern, - und _).");
+        if (!ServerListing.IsValidName(v.Name))
+            throw new ArgumentException($"name: 1 bis {ServerListing.MaxNameLength} Zeichen, ohne Steuerzeichen und ohne Leerzeichen am Anfang oder Ende.");
+
+        // So schreibt der Client die Adresse ins Ticket: immer mit Port, klein geschrieben (z. B. "Play.Example.org" → "play.example.org:32887").
+        string? address = null;
+        if (!string.IsNullOrWhiteSpace(v.Address))
+        {
+            if (!ServerAddress.TryParse(v.Address, out var parsed))
+                throw new ArgumentException($"address \"{v.Address}\" ist keine gültige Adresse (z. B. play.example.org:32887).");
+            address = parsed.ToString().ToLowerInvariant();
+        }
 
         var defaults = new ServerOptions();
         return new ServerOptions
@@ -130,7 +153,8 @@ public sealed class ServerOptions
             DataFolder = v.Data ?? defaults.DataFolder,
             MapsFolder = v.Maps ?? defaults.MapsFolder,
             SiteUrl = site,
-            Address = v.Address,
+            Address = address,
+            Listed = v.Listed,
             DevMode = v.Dev,
             ConfigFile = v.Config,
         };
@@ -183,6 +207,7 @@ public sealed class ServerOptions
                     case "maps": v.Maps = Path.Combine(folder, Text(p.Name, e)); break;
                     case "site": v.Site = NullableText(p.Name, e); break;
                     case "address": v.Address = NullableText(p.Name, e); break;
+                    case "listed": v.Listed = Bool(p.Name, e); break;
                     case "dev": v.Dev = Bool(p.Name, e); break;
                     default: throw new ArgumentException($"Config-Datei {path}: unbekannter Eintrag \"{p.Name}\".");
                 }
@@ -224,6 +249,7 @@ public sealed class ServerOptions
         public int MatchEndSeconds = DefaultMatch.MatchEndSeconds;
         public bool FriendlyFire = DefaultMatch.FriendlyFire;
         public string? Data, Maps, Site, Address;
+        public bool Listed = true;
         public bool Dev;
     }
 }
