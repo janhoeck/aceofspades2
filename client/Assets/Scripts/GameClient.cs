@@ -51,8 +51,10 @@ namespace AoS2.Client
         private BlockTextures _textures;
         private Material _voxelMaterial;
         private Material _lineMaterial;
-        private Material _playerMaterial;
-        private Texture2D _playerTexture;
+        private Material _blueMaterial;
+        private Material _greenMaterial;
+        private Texture2D _blueTexture;
+        private Texture2D _greenTexture;
         private VoxelMeshBuilder _builder;
         private FallingBlocks _offlineFalling;
         private float _accumulator;
@@ -149,9 +151,13 @@ namespace AoS2.Client
             _lineMaterial = new Material(lineShader) { name = "Blockrahmen" };
             _builder = new VoxelMeshBuilder(_textures.FaceTable);
 
-            _playerTexture = LoadModelTexture(Path.Combine(GameDataPaths.ModelsFolder, "player", "player_blue.png"));
-            _playerMaterial = new Material(modelShader) { name = "Spieler" };
-            _playerMaterial.SetTexture("_BaseMap", _playerTexture);
+            // Teamfarben: fertig eingefärbte Texturen aus assets-src/tools/bake-team-textures.mjs
+            _blueTexture = LoadModelTexture(Path.Combine(GameDataPaths.ModelsFolder, "player", "player_blue.png"));
+            _greenTexture = LoadModelTexture(Path.Combine(GameDataPaths.ModelsFolder, "player", "player_green.png"));
+            _blueMaterial = new Material(modelShader) { name = "Spieler Blau" };
+            _blueMaterial.SetTexture("_BaseMap", _blueTexture);
+            _greenMaterial = new Material(modelShader) { name = "Spieler Grün" };
+            _greenMaterial.SetTexture("_BaseMap", _greenTexture);
             EffectMaterial = new Material(modelShader) { name = "Effekte" };
         }
 
@@ -239,7 +245,9 @@ namespace AoS2.Client
             Session = new ClientSession(Registry, Movement, ReadMapFile, Net, () => Time.realtimeSinceStartupAsDouble, Combat);
             Session.EditRejected += result => Player?.ShowEditResult(result);
             Session.CombatEvent += OnCombatEvent;
+            Session.MatchEvent += OnMatchEvent;
             Feed.Clear();
+            _hadTeam = false;
             Net.Session = Session;
             Net.Connect(address, ticket);
         }
@@ -273,6 +281,7 @@ namespace AoS2.Client
             {
                 IsReady = true;
                 Status = null;
+                if (Session.Team == Team.None) OpenTeamMenu(); // erst ein Team wählen
                 Debug.Log($"[AoS2] Verbunden mit {ServerAddressText} als {Session.PlayerName}, Map \"{Session.MapName}\"");
             }
         }
@@ -334,6 +343,7 @@ namespace AoS2.Client
             Net = null;
             Session = null;
             IsReady = false;
+            TeamMenuOpen = false;
             DestroyWorldView();
             World = null;
             Metadata = null;
@@ -357,7 +367,7 @@ namespace AoS2.Client
             if (Mode == GameMode.Online)
             {
                 RemotePlayers = new GameObject("Andere Spieler").AddComponent<RemotePlayersView>();
-                RemotePlayers.Initialize(Rig, _playerMaterial, EffectMaterial);
+                RemotePlayers.Initialize(Rig, _blueMaterial, _greenMaterial, EffectMaterial);
                 Cracks = new GameObject("Risse").AddComponent<BlockCracksView>();
                 Cracks.Initialize(modelShader);
             }
@@ -397,10 +407,98 @@ namespace AoS2.Client
             _textures?.Dispose();
             if (_voxelMaterial != null) Destroy(_voxelMaterial);
             if (_lineMaterial != null) Destroy(_lineMaterial);
-            if (_playerMaterial != null) Destroy(_playerMaterial);
+            if (_blueMaterial != null) Destroy(_blueMaterial);
+            if (_greenMaterial != null) Destroy(_greenMaterial);
             if (EffectMaterial != null) Destroy(EffectMaterial);
-            if (_playerTexture != null) Destroy(_playerTexture);
+            if (_blueTexture != null) Destroy(_blueTexture);
+            if (_greenTexture != null) Destroy(_greenTexture);
         }
+
+        // ---- Teams ----
+
+        /// <summary>Das Team-Menü ist offen (Maus frei). Nach dem Beitritt immer, bis ein Team gewählt ist; danach mit M.</summary>
+        public bool TeamMenuOpen { get; private set; }
+
+        public void OpenTeamMenu()
+        {
+            if (Mode != GameMode.Online || Session == null) return;
+            TeamMenuOpen = true;
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+        }
+
+        /// <summary>Menü schließen (nur mit Team: ohne Team gibt es nichts zu spielen). Danach fängt ein Klick die Maus wieder.</summary>
+        public void CloseTeamMenu()
+        {
+            if (Session != null && Session.Team == Team.None) return;
+            TeamMenuOpen = false;
+        }
+
+        /// <summary>Team wählen (<see cref="Team.None"/> = automatisch). Das Menü schließt, wenn der Server zustimmt.</summary>
+        public void ChooseTeam(Team team)
+        {
+            if (Session == null) return;
+            if (team != Team.None && team == Session.Team)
+            {
+                TeamMenuOpen = false;
+                return;
+            }
+            Session.RequestTeam(team);
+        }
+
+        /// <summary>Darf man (laut eigenem Stand) in dieses Team? Gleiche Regel wie der Server: nicht voll, nicht größer als das andere.</summary>
+        public bool CanJoin(Team team)
+        {
+            if (Session == null || team == Session.Team) return false;
+            int mine = Session.TeamSize(team), other = Session.TeamSize(MapMetadata.Opponent(team));
+            if (Session.Team == MapMetadata.Opponent(team)) other--; // man selbst zählt nach dem Wechsel nicht mehr drüben
+            return mine < Session.Match.PlayersPerTeam && mine <= other;
+        }
+
+        public Team TeamOf(byte id)
+        {
+            if (Session == null) return Team.None;
+            if (id == Session.PlayerId) return Session.Team;
+            return Session.RemotePlayers.TryGetValue(id, out var p) ? p.Team : Team.None;
+        }
+
+        public static Color TeamColor(Team team) =>
+            team == Team.Blue ? new Color(0.35f, 0.6f, 1f) : team == Team.Green ? new Color(0.4f, 0.9f, 0.4f) : new Color(0.85f, 0.85f, 0.85f);
+
+        public static string TeamName(Team team) => team == Team.Blue ? "Blau" : team == Team.Green ? "Grün" : "kein Team";
+
+        private void OnMatchEvent(WorldEvent e)
+        {
+            switch (e.Type)
+            {
+                case WorldEventType.TeamChanged when e.PlayerId == Session.PlayerId:
+                    Feed.SwitchedTeam = _hadTeam; // die erste Wahl ist kein Wechsel: Zuschauer erscheinen sofort
+                    _hadTeam = true;
+                    Feed.ShowTeamMessage($"Du spielst jetzt für Team {TeamName(e.Team)}.");
+                    TeamMenuOpen = false;
+                    if (Application.isFocused)
+                    {
+                        Cursor.lockState = CursorLockMode.Locked; // direkt weiterspielen
+                        Cursor.visible = false;
+                    }
+                    break;
+                case WorldEventType.TeamDenied:
+                    Feed.ShowTeamMessage(e.DenyReason switch
+                    {
+                        TeamDenyReason.Full => "Das Team ist voll.",
+                        TeamDenyReason.Unbalanced => "Das Team hat schon mehr Spieler als das andere.",
+                        _ => "Du bist schon in diesem Team.",
+                    });
+                    break;
+                case WorldEventType.MatchState when e.Match.Phase == MatchPhase.Playing && Feed.MatchNumber != e.Match.MatchNumber:
+                    if (Feed.MatchNumber != 0) Feed.ShowTeamMessage("Neues Match!");
+                    Feed.MatchNumber = e.Match.MatchNumber;
+                    break;
+            }
+        }
+
+        /// <summary>Schon einmal in einem Team gewesen (in dieser Verbindung): Dann ist ein Teamwechsel ein Tod.</summary>
+        private bool _hadTeam;
 
         // ---- Kampf: Ereignisse vom Server in Anzeige und Effekte übersetzen ----
 
@@ -414,11 +512,11 @@ namespace AoS2.Client
                     Feed.OnDamaged(e, me, PositionOf(e.Attacker));
                     break;
                 case WorldEventType.PlayerKilled:
-                    Feed.OnKilled(e, me, NameOf(e.PlayerId), NameOf(e.Attacker), WeaponName(e.Weapon));
+                    Feed.OnKilled(e, me, NameOf(e.PlayerId), NameOf(e.Attacker), WeaponName(e.Weapon), TeamOf(e.PlayerId), TeamOf(e.Attacker));
                     if (e.PlayerId != me && Effects != null && Session.RemotePlayers.TryGetValue(e.PlayerId, out var victim))
                     {
                         var p = victim.Current.Position;
-                        Effects.Shatter(new Vector3(p.X, p.Y, p.Z), new Color(0.2f, 0.35f, 0.75f), new Color(0.25f, 0.27f, 0.3f));
+                        Effects.Shatter(new Vector3(p.X, p.Y, p.Z), Color.Lerp(TeamColor(victim.Team), Color.black, 0.3f), new Color(0.25f, 0.27f, 0.3f));
                     }
                     break;
                 case WorldEventType.ShotFired:

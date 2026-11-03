@@ -4,10 +4,13 @@ using AoS2.Shared.Json;
 
 namespace AoS2.Shared.Maps
 {
-    public enum Team
+    /// <summary>Team eines Spielers. Der Zahlenwert steht so im Netzwerkprotokoll.</summary>
+    public enum Team : byte
     {
-        Blue,
-        Green,
+        /// <summary>Noch kein Team gewählt (Zuschauer).</summary>
+        None = 0,
+        Blue = 1,
+        Green = 2,
     }
 
     /// <summary>Ein achsenparalleler Quader aus ganzen Blöcken: <c>Min</c> gehört dazu, <c>Max</c> nicht.</summary>
@@ -102,7 +105,10 @@ namespace AoS2.Shared.Maps
             return root.ToJson(indented);
         }
 
-        public static string TeamName(Team team) => team == Team.Blue ? "blue" : "green";
+        public static string TeamName(Team team) => team == Team.Blue ? "blue" : team == Team.Green ? "green" : "none";
+
+        /// <summary>Das andere Team (ohne Team: keins).</summary>
+        public static Team Opponent(Team team) => team == Team.Blue ? Team.Green : team == Team.Green ? Team.Blue : Team.None;
 
         private static Team ParseTeam(string name)
         {

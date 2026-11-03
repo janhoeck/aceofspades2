@@ -1,3 +1,4 @@
+using AoS2.Shared.Maps;
 using AoS2.Shared.Voxels;
 
 namespace AoS2.Shared.Movement
@@ -10,26 +11,34 @@ namespace AoS2.Shared.Movement
     /// Kollision: Der Spieler ist ein senkrechter Quader (Breite 2 × HalfWidth, Höhe je Haltung).
     /// Bewegt wird Achse für Achse (erst y, dann x, dann z); stößt der Quader an einen Block,
     /// bleibt er genau an dessen Grenze stehen.
+    ///
+    /// Unsichtbare Wände (seit M6): Die Spawnzone des Gegners zählt für die Bewegung wie feste Blöcke (<c>barriers</c>).
+    /// Steckt der Spieler schon in einer solchen Zone (z. B. nach einem Teamwechsel), gilt sie für ihn nicht, bis er draußen ist.
     /// </summary>
     public static class PlayerMovement
     {
         private const float Epsilon = 1e-4f;
 
-        public static PlayerState Step(PlayerState state, PlayerInput input, VoxelWorld world, MovementSettings settings)
+        public static PlayerState Step(PlayerState state, PlayerInput input, VoxelWorld world, MovementSettings settings) =>
+            Step(state, input, world, settings, null);
+
+        /// <param name="barriers">Quader, die zusätzlich zu den Blöcken fest sind (Spawnzonen des Gegners, <see cref="MapZones.BarriersFor"/>).</param>
+        public static PlayerState Step(PlayerState state, PlayerInput input, VoxelWorld world, MovementSettings settings, BlockBox[] barriers)
         {
             var dt = settings.DeltaTime;
             var hw = settings.HalfWidth;
             var pos = state.Position;
             var vel = state.Velocity;
+            var solid = new Solid(world, barriers, pos, hw, settings.Height(state.Crouching));
 
             // Steckt der Spieler in Blöcken (z. B. ein Block ist auf ihn gefallen), nach oben herausschieben.
-            if (Overlaps(world, pos, hw, settings.Height(state.Crouching)))
-                pos = PushOut(world, pos, hw, settings.Height(state.Crouching));
+            if (Overlaps(solid, pos, hw, settings.Height(state.Crouching)))
+                pos = PushOut(solid, pos, hw, settings.Height(state.Crouching));
 
             // ---- Haltung ----
             var crouching = state.Crouching;
             if (input.Has(InputButtons.Crouch)) crouching = true;
-            else if (crouching && !Overlaps(world, pos, hw, settings.StandHeight)) crouching = false; // Aufstehen nur mit Platz über dem Kopf
+            else if (crouching && !Overlaps(solid, pos, hw, settings.StandHeight)) crouching = false; // Aufstehen nur mit Platz über dem Kopf
             var height = settings.Height(crouching);
 
             // ---- Gewünschte Richtung aus Tasten und Blickrichtung ----
@@ -76,7 +85,7 @@ namespace AoS2.Shared.Movement
 
             // ---- Senkrecht bewegen ----
             var dy = vel.Y * dt;
-            if (MoveAxis(world, ref pos, 1, dy, hw, height))
+            if (MoveAxis(solid, ref pos, 1, dy, hw, height))
             {
                 onGround = dy < 0;
                 vel.Y = 0;
@@ -87,18 +96,18 @@ namespace AoS2.Shared.Movement
             float dx = vel.X * dt, dz = vel.Z * dt;
             var start = pos;
             var flat = pos;
-            var blockedX = MoveAxis(world, ref flat, 0, dx, hw, height);
-            var blockedZ = MoveAxis(world, ref flat, 2, dz, hw, height);
+            var blockedX = MoveAxis(solid, ref flat, 0, dx, hw, height);
+            var blockedZ = MoveAxis(solid, ref flat, 2, dz, hw, height);
             pos = flat;
 
             if ((blockedX || blockedZ) && onGround && settings.StepHeight > 0)
             {
                 var stepped = start;
-                if (!MoveAxis(world, ref stepped, 1, settings.StepHeight, hw, height))
+                if (!MoveAxis(solid, ref stepped, 1, settings.StepHeight, hw, height))
                 {
-                    var stepBlockedX = MoveAxis(world, ref stepped, 0, dx, hw, height);
-                    var stepBlockedZ = MoveAxis(world, ref stepped, 2, dz, hw, height);
-                    MoveAxis(world, ref stepped, 1, -settings.StepHeight, hw, height);
+                    var stepBlockedX = MoveAxis(solid, ref stepped, 0, dx, hw, height);
+                    var stepBlockedZ = MoveAxis(solid, ref stepped, 2, dz, hw, height);
+                    MoveAxis(solid, ref stepped, 1, -settings.StepHeight, hw, height);
                     // Die Stufe nur nehmen, wenn man damit weiter kommt als ohne.
                     if (HorizontalDistanceSq(start, stepped) > HorizontalDistanceSq(start, flat) + Epsilon)
                     {
@@ -122,12 +131,15 @@ namespace AoS2.Shared.Movement
         }
 
         /// <summary>Überschneidet der Spielerquader an <paramref name="feet"/> einen festen Block?</summary>
-        public static bool Overlaps(VoxelWorld world, Vec3 feet, float halfWidth, float height)
+        public static bool Overlaps(VoxelWorld world, Vec3 feet, float halfWidth, float height) =>
+            Overlaps(new Solid(world, null, feet, halfWidth, height), feet, halfWidth, height);
+
+        private static bool Overlaps(in Solid solid, Vec3 feet, float halfWidth, float height)
         {
             Range(feet.X - halfWidth, feet.X + halfWidth, out var x0, out var x1);
             Range(feet.Y, feet.Y + height, out var y0, out var y1);
             Range(feet.Z - halfWidth, feet.Z + halfWidth, out var z0, out var z1);
-            return RegionSolid(world, x0, x1, y0, y1, z0, z1);
+            return RegionSolid(solid, x0, x1, y0, y1, z0, z1);
         }
 
         /// <summary>Überschneidet der Spielerquader den Block (bx, by, bz)? Verhindert, dass man in sich selbst baut.</summary>
@@ -136,13 +148,13 @@ namespace AoS2.Shared.Movement
             feet.Y + height > by + Epsilon && feet.Y < by + 1 - Epsilon &&
             feet.Z + halfWidth > bz + Epsilon && feet.Z - halfWidth < bz + 1 - Epsilon;
 
-        private static Vec3 PushOut(VoxelWorld world, Vec3 pos, float hw, float height)
+        private static Vec3 PushOut(in Solid solid, Vec3 pos, float hw, float height)
         {
             var baseY = DetMath.FloorToInt(pos.Y);
             for (var k = 1; k <= 3; k++)
             {
                 var candidate = new Vec3(pos.X, baseY + k, pos.Z);
-                if (!Overlaps(world, candidate, hw, height)) return candidate;
+                if (!Overlaps(solid, candidate, hw, height)) return candidate;
             }
             return pos;
         }
@@ -151,7 +163,7 @@ namespace AoS2.Shared.Movement
         /// Bewegt den Quader entlang einer Achse (0 = x, 1 = y, 2 = z) um <paramref name="delta"/>.
         /// Prüft jede Blockschicht, die die Vorderkante überstreicht; liefert <c>true</c>, wenn ein Block im Weg war.
         /// </summary>
-        private static bool MoveAxis(VoxelWorld world, ref Vec3 pos, int axis, float delta, float hw, float height)
+        private static bool MoveAxis(in Solid solid, ref Vec3 pos, int axis, float delta, float hw, float height)
         {
             if (delta == 0f) return false;
 
@@ -172,7 +184,7 @@ namespace AoS2.Shared.Movement
                 var end = DetMath.FloorToInt(hi + delta - Epsilon);
                 for (var i = DetMath.FloorToInt(hi - Epsilon) + 1; i <= end; i++)
                 {
-                    if (!LayerSolid(world, axis, i, x0, x1, y0, y1, z0, z1)) continue;
+                    if (!LayerSolid(solid, axis, i, x0, x1, y0, y1, z0, z1)) continue;
                     // Vorderkante genau an die Blockgrenze i setzen
                     switch (axis)
                     {
@@ -188,7 +200,7 @@ namespace AoS2.Shared.Movement
                 var end = DetMath.FloorToInt(lo + delta + Epsilon);
                 for (var i = DetMath.FloorToInt(lo + Epsilon) - 1; i >= end; i--)
                 {
-                    if (!LayerSolid(world, axis, i, x0, x1, y0, y1, z0, z1)) continue;
+                    if (!LayerSolid(solid, axis, i, x0, x1, y0, y1, z0, z1)) continue;
                     switch (axis)
                     {
                         case 0: pos.X = i + 1 + hw; break;
@@ -208,22 +220,22 @@ namespace AoS2.Shared.Movement
             return false;
         }
 
-        private static bool LayerSolid(VoxelWorld world, int axis, int i, int x0, int x1, int y0, int y1, int z0, int z1)
+        private static bool LayerSolid(in Solid solid, int axis, int i, int x0, int x1, int y0, int y1, int z0, int z1)
         {
             switch (axis)
             {
-                case 0: return RegionSolid(world, i, i, y0, y1, z0, z1);
-                case 1: return RegionSolid(world, x0, x1, i, i, z0, z1);
-                default: return RegionSolid(world, x0, x1, y0, y1, i, i);
+                case 0: return RegionSolid(solid, i, i, y0, y1, z0, z1);
+                case 1: return RegionSolid(solid, x0, x1, i, i, z0, z1);
+                default: return RegionSolid(solid, x0, x1, y0, y1, i, i);
             }
         }
 
-        private static bool RegionSolid(VoxelWorld world, int x0, int x1, int y0, int y1, int z0, int z1)
+        private static bool RegionSolid(in Solid solid, int x0, int x1, int y0, int y1, int z0, int z1)
         {
             for (var y = y0; y <= y1; y++)
                 for (var z = z0; z <= z1; z++)
                     for (var x = x0; x <= x1; x++)
-                        if (world.IsSolidForMovement(x, y, z)) return true;
+                        if (solid.IsSolid(x, y, z)) return true;
             return false;
         }
 
@@ -238,6 +250,43 @@ namespace AoS2.Shared.Movement
         {
             float dx = b.X - a.X, dz = b.Z - a.Z;
             return dx * dx + dz * dz;
+        }
+
+        /// <summary>
+        /// Was für die Bewegung fest ist: Blöcke (mit Kartenrand und -boden) und die unsichtbaren Wände. Eine Wand, in der der
+        /// Quader zu Beginn des Ticks schon steckt, zählt in diesem Tick nicht (so kommt man aus ihr heraus statt festzuhängen).
+        /// </summary>
+        private readonly struct Solid
+        {
+            private readonly VoxelWorld _world;
+            private readonly BlockBox[] _barriers;
+            private readonly int _active; // Bit i = Wand i zählt
+
+            public Solid(VoxelWorld world, BlockBox[] barriers, Vec3 feet, float halfWidth, float height)
+            {
+                _world = world;
+                _barriers = barriers;
+                _active = 0;
+                if (barriers == null) return;
+                Range(feet.X - halfWidth, feet.X + halfWidth, out var x0, out var x1);
+                Range(feet.Y, feet.Y + height, out var y0, out var y1);
+                Range(feet.Z - halfWidth, feet.Z + halfWidth, out var z0, out var z1);
+                for (var i = 0; i < barriers.Length && i < 32; i++)
+                {
+                    var b = barriers[i];
+                    var inside = x1 >= b.MinX && x0 < b.MaxX && y1 >= b.MinY && y0 < b.MaxY && z1 >= b.MinZ && z0 < b.MaxZ;
+                    if (!inside) _active |= 1 << i;
+                }
+            }
+
+            public bool IsSolid(int x, int y, int z)
+            {
+                if (_world.IsSolidForMovement(x, y, z)) return true;
+                if (_active == 0) return false;
+                for (var i = 0; i < _barriers.Length && i < 32; i++)
+                    if ((_active & (1 << i)) != 0 && _barriers[i].Contains(x, y, z)) return true;
+                return false;
+            }
         }
     }
 }

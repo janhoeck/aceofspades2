@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using AoS2.Shared;
 using AoS2.Shared.Combat;
+using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Rig;
 using AoS2.Shared.Voxels;
@@ -402,6 +403,20 @@ namespace AoS2.Shared.Net
 
         /// <summary>Ein Geschoss explodiert (Blöcke und Schaden kommen als eigene Ereignisse).</summary>
         ProjectileExploded = 13,
+
+        // ---- Team Deathmatch (ab M6) ----
+
+        /// <summary>Ein Spieler ist in einem Team (beim Beitritt für alle anderen, danach bei jedem Wechsel, an alle).</summary>
+        TeamChanged = 14,
+
+        /// <summary>Kills und Tode eines Spielers (beim Beitritt für alle, danach nach jedem Tod für Opfer und Schützen).</summary>
+        PlayerStats = 15,
+
+        /// <summary>Stand des Matches (<see cref="MatchInfo"/>): Punkte, Phase, Neustart.</summary>
+        MatchState = 16,
+
+        /// <summary>Antwort auf einen abgelehnten <see cref="TeamSelectRequest"/> (nur an den Absender).</summary>
+        TeamDenied = 17,
     }
 
     /// <summary>Was ein Schuss getroffen hat (<see cref="WorldEventType.ShotFired"/>).</summary>
@@ -455,6 +470,14 @@ namespace AoS2.Shared.Net
         public Vec3 Vector;
 
         public int ProjectileId;
+
+        // ---- Team Deathmatch (ab M6) ----
+
+        public Team Team;
+        public ushort Kills;
+        public ushort Deaths;
+        public MatchInfo Match;
+        public TeamDenyReason DenyReason;
 
         /// <summary>Zone bei Schaden durch eine Explosion.</summary>
         public const byte ExplosionZone = 255;
@@ -586,6 +609,33 @@ namespace AoS2.Shared.Net
             NetCodec.WriteVec(w, position);
         }
 
+        public static void WriteTeamChanged(NetWriter w, byte playerId, Team team)
+        {
+            w.WriteByte((byte)WorldEventType.TeamChanged);
+            w.WriteByte(playerId);
+            w.WriteByte((byte)team);
+        }
+
+        public static void WritePlayerStats(NetWriter w, byte playerId, int kills, int deaths)
+        {
+            w.WriteByte((byte)WorldEventType.PlayerStats);
+            w.WriteByte(playerId);
+            w.WriteUShort((ushort)System.Math.Min(kills, ushort.MaxValue));
+            w.WriteUShort((ushort)System.Math.Min(deaths, ushort.MaxValue));
+        }
+
+        public static void WriteMatchState(NetWriter w, MatchInfo match)
+        {
+            w.WriteByte((byte)WorldEventType.MatchState);
+            match.Write(w);
+        }
+
+        public static void WriteTeamDenied(NetWriter w, TeamDenyReason reason)
+        {
+            w.WriteByte((byte)WorldEventType.TeamDenied);
+            w.WriteByte((byte)reason);
+        }
+
         /// <summary>Liest alle Ereignisse nach dem Typ-Byte bis zum Ende der Nachricht.</summary>
         public static void Read(NetReader r, List<WorldEvent> into)
         {
@@ -669,6 +719,23 @@ namespace AoS2.Shared.Net
                         e.Weapon = r.ReadByte();
                         e.Tick = r.ReadUInt();
                         e.Position = NetCodec.ReadVec(r);
+                        break;
+                    case WorldEventType.TeamChanged:
+                        e.PlayerId = r.ReadByte();
+                        e.Team = NetCodec.ReadTeam(r);
+                        break;
+                    case WorldEventType.PlayerStats:
+                        e.PlayerId = r.ReadByte();
+                        e.Kills = r.ReadUShort();
+                        e.Deaths = r.ReadUShort();
+                        break;
+                    case WorldEventType.MatchState:
+                        e.Match = MatchInfo.Read(r);
+                        break;
+                    case WorldEventType.TeamDenied:
+                        var reason = r.ReadByte();
+                        if (reason < (byte)TeamDenyReason.Full || reason > (byte)TeamDenyReason.SameTeam) throw new ProtocolException($"Unbekannter Ablehnungsgrund {reason}.");
+                        e.DenyReason = (TeamDenyReason)reason;
                         break;
                     default:
                         throw new ProtocolException($"Unbekanntes Ereignis {(byte)e.Type}.");

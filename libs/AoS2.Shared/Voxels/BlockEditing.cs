@@ -1,3 +1,4 @@
+using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 
 namespace AoS2.Shared.Voxels
@@ -21,6 +22,12 @@ namespace AoS2.Shared.Voxels
 
         /// <summary>Server: Tote können weder abbauen noch bauen.</summary>
         Dead,
+
+        /// <summary>Der Block liegt in einer Spawnzone oder außerhalb der Kampfzone (<see cref="MapZones.CanEditBlock"/>).</summary>
+        ProtectedZone,
+
+        /// <summary>Server: Das Match ist vorbei, bis zum Neustart ändert sich nichts.</summary>
+        MatchOver,
     }
 
     /// <summary>
@@ -35,25 +42,29 @@ namespace AoS2.Shared.Voxels
         /// <summary>Mindestabstand zwischen zwei Aktionen in Ticks (12 Ticks = 0,2 s bei 60 Ticks/s).</summary>
         public const int CooldownTicks = 12;
 
-        public static BlockEditResult CanRemove(VoxelWorld world, BlockRegistry registry, int x, int y, int z, float distance)
+        /// <param name="zones">Zonen der Map; <c>null</c> = keine (überall erlaubt).</param>
+        public static BlockEditResult CanRemove(VoxelWorld world, BlockRegistry registry, int x, int y, int z, float distance, MapZones zones = null)
         {
             if (distance > Reach) return BlockEditResult.OutOfReach;
             if (!world.IsInside(x, y, z)) return BlockEditResult.OutsideWorld;
             var id = world.GetBlock(x, y, z);
             if (id == BlockRegistry.Air) return BlockEditResult.NothingThere;
             if (registry.IsIndestructible(id)) return BlockEditResult.Indestructible;
+            if (zones != null && !zones.CanEditBlock(x, y, z)) return BlockEditResult.ProtectedZone;
             return BlockEditResult.Ok;
         }
 
         /// <param name="player">Zustand des bauenden Spielers: In den eigenen Quader darf man nicht bauen.</param>
+        /// <param name="zones">Zonen der Map; <c>null</c> = keine (überall erlaubt).</param>
         public static BlockEditResult CanPlace(VoxelWorld world, BlockRegistry registry, int x, int y, int z, byte id, float distance,
-            PlayerState player, MovementSettings settings)
+            PlayerState player, MovementSettings settings, MapZones zones = null)
         {
             if (distance > Reach) return BlockEditResult.OutOfReach;
             if (!world.IsInside(x, y, z)) return BlockEditResult.OutsideWorld;
             var type = registry.Get(id);
             if (type == null || !type.Buildable) return BlockEditResult.NotBuildable;
             if (world.IsSolid(x, y, z)) return BlockEditResult.Occupied;
+            if (zones != null && !zones.CanEditBlock(x, y, z)) return BlockEditResult.ProtectedZone;
             if (PlayerMovement.OverlapsBlock(player.Position, settings.HalfWidth, settings.Height(player.Crouching), x, y, z))
                 return BlockEditResult.BlockedByPlayer;
             return BlockEditResult.Ok;

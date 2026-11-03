@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using AoS2.JoinTickets;
 using AoS2.Net;
 using AoS2.Shared;
+using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Net;
 using AoS2.Shared.Net.Client;
@@ -31,7 +32,7 @@ public sealed class UdpIntegrationTests : IDisposable
     public UdpIntegrationTests()
     {
         _tickets = new TicketCheck(null, JoinTicketValidator.ForDevelopment(DevJoinTicket.Key, DevJoinTicket.Issuer, TimeProvider.System), TimeProvider.System);
-        _server = new GameServer(TestArena.Content, 8, _tickets, NullLogger.Instance);
+        _server = new GameServer(TestArena.Content, new MatchSettings { PlayersPerTeam = 4 }, _tickets, NullLogger.Instance);
         _server.Start(0);
     }
 
@@ -76,6 +77,14 @@ public sealed class UdpIntegrationTests : IDisposable
 
     private void PumpFor(double seconds) => Pump(() => false, seconds);
 
+    /// <summary>Setzt einen Spieler auf dem Server an eine Stelle (der Client springt beim nächsten Snapshot mit).</summary>
+    private void Teleport(UdpTestClient client, Vec3 feet)
+    {
+        var p = _server.Match.FindPlayer(client.Session.PlayerId)!;
+        p.State = new PlayerState { Position = feet, OnGround = true };
+        p.Remember(p.LastProcessedTick, p.State, p.LastInput);
+    }
+
     [Fact]
     public void TwoClients_MoveAndEditBlocks_OverRealUdp()
     {
@@ -117,6 +126,10 @@ public sealed class UdpIntegrationTests : IDisposable
         var a = Connect("Anna", packetLoss: 5);
         var b = Connect("Ben", packetLoss: 5);
         Assert.True(Pump(() => a.Playing && b.Playing && a.Session.RemotePlayers.Count == 1));
+        // Aus den Spawnzonen heraus: Dort kann man weder schießen noch getroffen werden.
+        Teleport(a, new Vec3(16.5f, 4, 24.5f));
+        Teleport(b, new Vec3(19.5f, 4, 30.5f));
+        PumpFor(0.3);
         var kills = new List<WorldEvent>();
         b.Session.CombatEvent += e => { if (e.Type == WorldEventType.PlayerKilled) kills.Add(e); };
 
@@ -259,17 +272,27 @@ public sealed class UdpIntegrationTests : IDisposable
         public Func<UdpTestClient, BlockEditResult>? EditAfterTick;
         public List<BlockEditResult> Rejected { get; } = new();
 
-        public bool Playing => Session.Phase == ClientPhase.Playing;
+        /// <summary>Welt synchronisiert und im Team (wählt nach dem Beitritt automatisch eins, wie ein Klick auf „Automatisch“).</summary>
+        public bool Playing => Synced && Session.Team != Team.None && Session.Alive;
+
+        public bool Synced => Session.Phase == ClientPhase.Playing;
+
+        private bool _teamRequested;
 
         public void Update()
         {
             Net.Poll();
             Session.Update();
+            if (Synced && !_teamRequested)
+            {
+                Session.RequestTeam(Team.None);
+                _teamRequested = true;
+            }
             if (Next == 0) Next = Clock();
             while (Clock() >= Next)
             {
                 Next += 1.0 / 60;
-                if (!Playing) continue;
+                if (!Synced) continue;
                 Session.Tick(Input);
                 if (EditAfterTick != null)
                 {

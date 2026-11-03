@@ -28,6 +28,12 @@ internal static class TestArena
     public static readonly Vec3 SpawnA = new(16.5f, 4, 16.5f);
     public static readonly Vec3 SpawnB = new(19.5f, 4, 16.5f);
 
+    /// <summary>Spawnzone Blau: die Säule über (16, 4, 16) bis y = 8, darin Spawn A.</summary>
+    public static readonly BlockBox BlueZone = new(16, 4, 16, 17, 8, 17);
+
+    /// <summary>Spawnzone Grün: die Säule über (19, 4, 16) bis y = 8, darin Spawn B.</summary>
+    public static readonly BlockBox GreenZone = new(19, 4, 16, 20, 8, 17);
+
     public static BlockRegistry Registry { get; } = BlockRegistry.Parse("""
         { "blocks": [
           { "id": 1, "name": "bedrock", "indestructible": true, "textures": { "all": "b" } },
@@ -65,11 +71,10 @@ internal static class TestArena
         for (var y = 4; y <= 7; y++) world.SetBlock(13, y, 16, Stone);
         for (var x = 8; x <= 12; x++) world.SetBlock(x, 7, 16, Build);
 
+        // Winzige Spawnzonen (eine Blocksäule um den Spawnpunkt), damit sie die übrigen Tests nicht stören.
         var metadata = new MapMetadata { Name = "Test-Arena" };
-        var spawn = new TeamSpawn { Zone = new BlockBox(14, 4, 14, 24, 8, 20) };
-        spawn.Points.Add(SpawnA);
-        spawn.Points.Add(SpawnB);
-        metadata.Teams[Team.Blue] = spawn;
+        metadata.Teams[Team.Blue] = new TeamSpawn { Zone = BlueZone, Points = { SpawnA } };
+        metadata.Teams[Team.Green] = new TeamSpawn { Zone = GreenZone, Points = { SpawnB } };
 
         using var file = new MemoryStream();
         MapFile.Write(file, world, metadata, Registry);
@@ -101,11 +106,11 @@ internal sealed class SimulatedNetwork : IMatchOutput
     private readonly Dictionary<byte, TestClient> _byPlayer = new();
     private readonly List<TestClient> _clients = new();
 
-    public SimulatedNetwork(int seed = 1, GameContent? content = null)
+    public SimulatedNetwork(int seed = 1, GameContent? content = null, MatchSettings? settings = null)
     {
         Random = new Random(seed);
         Content = content ?? TestArena.Content;
-        Match = new Match(Content, this, NullLogger.Instance);
+        Match = new Match(Content, this, NullLogger.Instance, settings);
     }
 
     public GameContent Content { get; }
@@ -122,15 +127,20 @@ internal sealed class SimulatedNetwork : IMatchOutput
     /// <summary>Anteil verlorener Pakete (0 … 1).</summary>
     public double Loss { get; set; }
 
-    public TestClient Join(string name)
+    /// <summary>
+    /// Ein Client tritt bei und wählt gleich ein Team (<see cref="Team.None"/> = automatisch, also abwechselnd Blau und Grün;
+    /// <c>null</c> = bleibt Zuschauer).
+    /// </summary>
+    public TestClient Join(string name, Team? team = Team.None)
     {
         var client = new TestClient(this, name);
-        Match.AddPlayer(Guid.NewGuid(), name, p =>
+        var player = Match.AddPlayer(Guid.NewGuid(), name, p =>
         {
             client.PlayerId = p.Id;
             _byPlayer[p.Id] = client;
         });
         _clients.Add(client);
+        if (team is { } wish) Assert.Null(Match.SelectTeam(player, wish));
         return client;
     }
 
@@ -250,6 +260,7 @@ internal sealed class TestClient : IMessageSender
             map => map == content.MapName ? content.MapFileBytes : null, this, () => net.Time, content.Combat);
         Session.EditRejected += result => Rejected.Add(result);
         Session.CombatEvent += e => Events.Add(e);
+        Session.MatchEvent += e => MatchEvents.Add(e);
     }
 
     public string Name { get; }
@@ -270,6 +281,9 @@ internal sealed class TestClient : IMessageSender
     /// <summary>Kampf-Ereignisse, die beim Client angekommen sind.</summary>
     public List<WorldEvent> Events { get; } = new();
 
+    /// <summary>Team-Ereignisse (Teamwechsel, Stand des Matches, Ablehnungen, Kills/Tode), die beim Client angekommen sind.</summary>
+    public List<WorldEvent> MatchEvents { get; } = new();
+
     /// <summary>Plätze der Waffen, die laut Vorhersage gefeuert haben.</summary>
     public List<int> Fired { get; } = new();
 
@@ -280,6 +294,9 @@ internal sealed class TestClient : IMessageSender
     public Dictionary<byte, PlayerSnapshot> SeenAtLastShot { get; } = new();
 
     public PlayerState State => Session.Prediction.State;
+
+    /// <summary>Synchronisiert, im Team und vom Server gespawnt (der erste Snapshot mit Leben hat die Vorhersage an den Spawn gesetzt).</summary>
+    public bool Ready => Session.Phase == ClientPhase.Playing && Session.Alive;
 
     void IMessageSender.Send(NetWriter message, Delivery delivery) => ToServer.Enqueue(_net, message.ToArray(), delivery);
 

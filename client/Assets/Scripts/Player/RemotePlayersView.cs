@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AoS2.Shared.Maps;
 using AoS2.Shared.Net.Client;
 using AoS2.Shared.Rig;
 using UnityEngine;
@@ -9,7 +10,7 @@ namespace AoS2.Client.Player
     /// Zeigt die anderen Spieler im Netzspiel mit dem Spielermodell (<see cref="PlayerModel"/>). Position, Blick, Animation und
     /// Waffe kommen interpoliert aus der <see cref="ClientSession"/> (leicht verzögert, dafür flüssig); die Pose rechnet
     /// <see cref="PlayerPose"/> aus AoS2.Shared zum selben Zeitpunkt, zu dem der Server beim Lag-Ausgleich prüft.
-    /// Tote Spieler werden ausgeblendet.
+    /// Die Textur zeigt das Team (Blau oder Grün). Tote Spieler und Zuschauer werden ausgeblendet.
     /// </summary>
     public sealed class RemotePlayersView : MonoBehaviour
     {
@@ -17,7 +18,8 @@ namespace AoS2.Client.Player
 
         private PlayerRig _rig;
         private PlayerPose _pose;
-        private Material _material;
+        private Material _blue;
+        private Material _green;
         private Material _weaponMaterial;
         private readonly Dictionary<byte, Avatar> _avatars = new Dictionary<byte, Avatar>();
         private readonly List<byte> _gone = new List<byte>();
@@ -25,6 +27,7 @@ namespace AoS2.Client.Player
         private sealed class Avatar
         {
             public PlayerModel Model;
+            public Team Team;
             public float FlashUntil;
         }
 
@@ -40,16 +43,20 @@ namespace AoS2.Client.Player
 
         public int Count => _avatars.Count;
 
-        public void Initialize(PlayerRig rig, Material material, Material weaponMaterial)
+        public void Initialize(PlayerRig rig, Material blue, Material green, Material weaponMaterial)
         {
             _rig = rig;
             _pose = new PlayerPose(rig);
-            _material = material;
+            _blue = blue;
+            _green = green;
             _weaponMaterial = weaponMaterial;
         }
 
         /// <summary>Modell eines Spielers (oder <c>null</c>), z. B. für Mündungsfeuer an seiner Waffe.</summary>
         public PlayerModel Model(byte id) => _avatars.TryGetValue(id, out var a) ? a.Model : null;
+
+        /// <summary>Team, dessen Farbe das Modell gerade trägt (für Tests).</summary>
+        public Team ShownTeam(byte id) => _avatars.TryGetValue(id, out var a) ? a.Team : Team.None;
 
         /// <summary>Getroffen: Modell kurz aufleuchten lassen.</summary>
         public void Flash(byte id)
@@ -65,12 +72,18 @@ namespace AoS2.Client.Player
                 if (!remote.HasState) continue;
                 if (!_avatars.TryGetValue(remote.Id, out var avatar))
                 {
-                    avatar = new Avatar { Model = PlayerModel.Create(_rig, _material, _weaponMaterial, transform, "Spieler " + remote.Name) };
+                    avatar = new Avatar { Model = PlayerModel.Create(_rig, MaterialFor(remote.Team), _weaponMaterial, transform, "Spieler " + remote.Name), Team = remote.Team };
                     _avatars.Add(remote.Id, avatar);
                 }
+                if (avatar.Team != remote.Team)
+                {
+                    avatar.Team = remote.Team;
+                    avatar.Model.SetMaterial(MaterialFor(remote.Team));
+                }
                 var s = remote.Current;
-                avatar.Model.gameObject.SetActive(s.Alive);
-                if (!s.Alive) continue;
+                var visible = s.Alive && remote.Team != Team.None;
+                avatar.Model.gameObject.SetActive(visible);
+                if (!visible) continue;
                 _pose.Evaluate(s.Animation, session.RenderTick, s.Pitch, s.Weapon);
                 avatar.Model.transform.position = new Vector3(s.Position.X, s.Position.Y, s.Position.Z);
                 avatar.Model.Apply(_pose, s.Position, s.Yaw, s.Weapon);
@@ -86,5 +99,7 @@ namespace AoS2.Client.Player
                 _avatars.Remove(id);
             }
         }
+
+        private Material MaterialFor(Team team) => team == Team.Green ? _green : _blue;
     }
 }

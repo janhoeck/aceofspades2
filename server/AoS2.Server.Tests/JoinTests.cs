@@ -27,7 +27,7 @@ public class ServerOptionsTests
     [Fact]
     public void Dev_AllowsStartWithoutBackend()
     {
-        var options = ServerOptions.Parse(["--dev", "--port", "4000", "--map", "arena", "--max-players", "4"]);
+        var options = ServerOptions.Parse(["--dev", "--port", "4000", "--map", "arena", "--players-per-team", "2"]);
         Assert.True(options.DevMode);
         Assert.Null(options.SiteUrl);
         Assert.Equal((4000, "arena", 4), (options.Port, options.Map, options.MaxPlayers));
@@ -36,7 +36,8 @@ public class ServerOptionsTests
     [Theory]
     [InlineData("--port", "0")]
     [InlineData("--port", "x")]
-    [InlineData("--max-players", "100")]
+    [InlineData("--players-per-team", "25")]
+    [InlineData("--score-limit", "0")]
     [InlineData("--map", "../geheim")]
     [InlineData("--site", "ftp://example.org")]
     [InlineData("--unbekannt", "1")]
@@ -49,6 +50,92 @@ public class ServerOptionsTests
 
     [Fact]
     public void MissingValue_Throws() => Assert.Throws<ArgumentException>(() => ServerOptions.Parse(["--dev", "--port"]));
+
+    [Fact]
+    public void Defaults_TeamDeathmatch16v16To50()
+    {
+        var options = ServerOptions.Parse(["--dev"]);
+        Assert.Equal((16, 50, 0, 15, false), (options.Match.PlayersPerTeam, options.Match.ScoreLimit, options.Match.TimeLimitMinutes,
+            options.Match.MatchEndSeconds, options.Match.FriendlyFire));
+        Assert.Equal(32, options.MaxPlayers);
+    }
+
+    // ---- Config-Datei ----
+
+    private static string WriteConfig(string json)
+    {
+        var dir = Directory.CreateTempSubdirectory("aos2-config-");
+        var path = Path.Combine(dir.FullName, "server.json");
+        File.WriteAllText(path, json);
+        return path;
+    }
+
+    [Fact]
+    public void ConfigFile_SetsEverything_CommandLineWins()
+    {
+        var path = WriteConfig("""
+            // Kommentare sind erlaubt
+            {
+              "name": "Freitagsrunde",
+              "port": 4000,
+              "map": "arena",
+              "playersPerTeam": 8,
+              "scoreLimit": 30,
+              "timeLimitMinutes": 20,
+              "matchEndSeconds": 10,
+              "friendlyFire": true,
+              "data": "spieldaten",
+              "maps": "karten",
+              "site": "https://aos2.example.org/",
+              "address": "play.example.org:4000",
+              "dev": false,
+            }
+            """);
+        var options = ServerOptions.Parse(["--config", path, "--score-limit", "5"]);
+        Assert.Equal("Freitagsrunde", options.Name);
+        Assert.Equal((4000, "arena"), (options.Port, options.Map));
+        Assert.Equal(new MatchSettings { PlayersPerTeam = 8, ScoreLimit = 5, TimeLimitMinutes = 20, MatchEndSeconds = 10, FriendlyFire = true }, options.Match);
+        Assert.Equal(16, options.MaxPlayers);
+        var folder = Path.GetDirectoryName(path)!;
+        Assert.Equal(Path.Combine(folder, "spieldaten"), options.DataFolder);
+        Assert.Equal(Path.Combine(folder, "karten"), options.MapsFolder);
+        Assert.Equal(("https://aos2.example.org", "play.example.org:4000"), (options.SiteUrl, options.Address));
+        Assert.False(options.DevMode);
+        Assert.Equal(path, options.ConfigFile);
+    }
+
+    [Theory]
+    [InlineData("""{ "scoreLimt": 10, "dev": true }""", "scoreLimt")]
+    [InlineData("""{ "playersPerTeam": 25, "dev": true }""", "playersPerTeam")]
+    [InlineData("""{ "friendlyFire": "ja", "dev": true }""", "friendlyFire")]
+    [InlineData("""{ "port": 1.5, "dev": true }""", "port")]
+    [InlineData("""[ 1, 2 ]""", "JSON-Objekt")]
+    [InlineData("""{ "dev": true""", "JSON")]
+    [InlineData("""{ "map": "../geheim", "dev": true }""", "map")]
+    [InlineData("""{ }""", "--dev")]
+    public void ConfigFile_Invalid_ThrowsWithReason(string json, string mentioned)
+    {
+        var e = Assert.Throws<ArgumentException>(() => ServerOptions.Parse(["--config", WriteConfig(json)]));
+        Assert.Contains(mentioned, e.Message);
+    }
+
+    [Fact]
+    public void ConfigFile_Missing_Throws() =>
+        Assert.Throws<ArgumentException>(() => ServerOptions.Parse(["--config", Path.Combine(Path.GetTempPath(), "gibt-es-nicht.json")]));
+
+    [Fact]
+    public void ExampleConfig_IsValid_AndMatchesDefaults()
+    {
+        var options = ServerOptions.Parse(["--config", TestArena.RepoFile("server/AoS2.Server/server.example.json")]);
+        Assert.Equal(new MatchSettings(), options.Match);
+        Assert.Equal(new ServerOptions().Port, options.Port);
+        Assert.Equal("testmap", options.Map);
+        Assert.False(options.DevMode);
+        Assert.NotNull(options.SiteUrl);
+
+        // Neben der exe liegt eine Kopie (zum Kopieren und Anpassen).
+        Assert.True(File.Exists(Path.Combine(AppContext.BaseDirectory, "server.example.json")));
+    }
 }
 
 public sealed class TicketCheckTests : IDisposable

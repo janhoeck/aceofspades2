@@ -1,4 +1,5 @@
 using AoS2.Shared.Combat;
+using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Rig;
 
@@ -25,6 +26,9 @@ namespace AoS2.Shared.Net
         // Client → Server
         Input = 1,
         BlockEdit = 2,
+
+        /// <summary>Teamwunsch (<see cref="TeamSelectRequest"/>).</summary>
+        TeamSelect = 3,
 
         // Server → Client
         Welcome = 10,
@@ -190,6 +194,13 @@ namespace AoS2.Shared.Net
                 a.BlendStart = tick < PlayerAnimator.BlendTicks ? 0 : tick - PlayerAnimator.BlendTicks;
             }
             return a;
+        }
+
+        public static Team ReadTeam(NetReader r)
+        {
+            var team = r.ReadByte();
+            if (team > (byte)Team.Green) throw new ProtocolException($"Unbekanntes Team {team}.");
+            return (Team)team;
         }
 
         /// <summary>Volle Tick-Nummer aus den unteren 16 Bit: der letzte Tick bis <paramref name="reference"/> mit diesen Bits.</summary>

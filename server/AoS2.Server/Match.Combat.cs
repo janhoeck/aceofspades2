@@ -75,21 +75,19 @@ public sealed partial class Match
     {
         foreach (var p in _players.Values)
         {
-            if (p.Alive || Tick < p.RespawnAt) continue;
-            p.State = new PlayerState { Position = Spawns.Pick(World, Metadata, _spawnCounter++) };
-            p.Remember(p.LastProcessedTick, p.State, p.LastInput); // Blockaktionen ab jetzt vom Spawn aus prüfen
-            p.Health = _content.Combat.Health;
-            p.WeaponsState = WeaponState.Full(_content.Combat, p.WeaponsState.Slot);
-            p.AnimationState = PlayerAnimator.Start(_content.Rig, Tick);
-            p.Life++;
+            if (p.Alive || p.Team == Team.None || Tick < p.RespawnAt) continue;
+            Respawn(p);
             _log.LogDebug("{Name} ist wieder da", p.Name);
         }
     }
 
-    /// <summary>Schaden zufügen. Bei 0 Lebenspunkten stirbt der Spieler und erscheint nach <c>respawnSeconds</c> neu.</summary>
-    private void Damage(ServerPlayer victim, byte attacker, float amount, byte weapon, byte zone)
+    /// <summary>
+    /// Schaden zufügen. Bei 0 Lebenspunkten stirbt der Spieler und erscheint nach <c>respawnSeconds</c> neu. Kein Schaden in der
+    /// Spawnzone, nach dem Matchende und (ohne Teambeschuss) von Mitspielern. Der Kill eines Gegners ist ein Punkt für sein Team.
+    /// </summary>
+    internal void Damage(ServerPlayer victim, byte attacker, float amount, byte weapon, byte zone)
     {
-        if (!victim.Alive) return;
+        if (!victim.Alive || !CanDamage(victim, FindPlayer(attacker))) return;
         var damage = (int)Math.Ceiling(amount - 0.001f);
         if (damage <= 0) return;
         damage = Math.Min(damage, victim.Health);
@@ -103,12 +101,19 @@ public sealed partial class Match
         victim.RespawnAt = Tick + (uint)_content.Combat.RespawnTicks;
         victim.Deaths++;
         var killer = FindPlayer(attacker);
-        if (killer != null && killer != victim) killer.Kills++;
+        var enemyKill = killer != null && killer != victim && killer.Team != Team.None && killer.Team != victim.Team;
+        if (enemyKill) killer!.Kills++;
         _scratch.Clear();
         WorldEvents.WritePlayerKilled(_scratch, victim.Id, attacker, weapon, zone);
         Broadcast(_scratch);
         _log.LogInformation("{Victim} wurde von {Killer} getötet ({Weapon})", victim.Name,
             killer == null ? "?" : killer == victim ? "sich selbst" : killer.Name, _content.Combat.Weapon(weapon)?.DisplayName);
+        BroadcastStats(victim);
+        if (enemyKill)
+        {
+            BroadcastStats(killer!);
+            Score(killer!.Team);
+        }
     }
 
     // ---- Schießen ----
@@ -128,14 +133,21 @@ public sealed partial class Match
     {
         var blockHit = VoxelRaycast.Cast(World, eye, dir, weapon.Range, out var hit);
         var nearest = blockHit ? hit.Distance : weapon.Range;
+        // Die Grenze einer Spawnzone hält den Schuss auf wie eine Wand (kein Schießen in den Spawn hinein).
+        if (Zones.Raycast(eye, dir, nearest, out var wall, out _, out _, out _))
+        {
+            nearest = wall;
+            blockHit = false;
+        }
 
-        // Lag-Ausgleich: jeden Gegner so zurückholen, wie der Schütze ihn gesehen hat.
+        // Lag-Ausgleich: jeden Gegner so zurückholen, wie der Schütze ihn gesehen hat. Mitspieler (ohne Teambeschuss) lassen
+        // den Schuss durch.
         var view = ClampViewTick(viewTick);
         ServerPlayer? victim = null;
         var zone = HitZone.Torso;
         foreach (var other in _players.Values)
         {
-            if (other == shooter || !other.Alive || !TryRewind(other, view, out var seen) || !seen.Alive) continue;
+            if (other == shooter || !other.Alive || PassesThrough(shooter, other) || !TryRewind(other, view, out var seen) || !seen.Alive) continue;
             _pose.Evaluate(seen.Animation, view, seen.Pitch, seen.Weapon);
             if (!_pose.Raycast(seen.Position, seen.Yaw, null, eye, dir, nearest, out var distance, out var box)) continue;
             nearest = distance;
@@ -195,7 +207,7 @@ public sealed partial class Match
 
     private void DamageBlock(int x, int y, int z, float amount)
     {
-        if (amount <= 0) return;
+        if (amount <= 0 || !Zones.CanEditBlock(x, y, z)) return;
         if (BlockDamage.Add(x, y, z, amount))
         {
             RemoveBlock(x, y, z);
@@ -252,7 +264,7 @@ public sealed partial class Match
                 playerHit = HitPlayer(start, v * dt, sp.Projectile.Owner);
             }
 
-            var explode = ProjectileSim.Step(ref sp.Projectile, weapon, World, dt);
+            var explode = ProjectileSim.Step(ref sp.Projectile, weapon, World, dt, Zones);
             if (playerHit is { } t && (!explode || t <= Vec3.Distance(start, sp.Projectile.Position)))
             {
                 sp.Projectile.Position = start + sp.Projectile.Velocity.Normalized * t;
@@ -270,11 +282,12 @@ public sealed partial class Match
         var length = move.Length;
         if (length <= 0) return null;
         var dir = move * (1 / length);
+        var shooter = FindPlayer(owner);
         float? nearest = null;
         var m = _content.Movement;
         foreach (var p in _players.Values)
         {
-            if (p.Id == owner || !p.Alive) continue;
+            if (p.Id == owner || !p.Alive || PassesThrough(shooter, p)) continue;
             var feet = p.State.Position;
             var min = new Vec3(feet.X - m.HalfWidth, feet.Y, feet.Z - m.HalfWidth);
             var max = new Vec3(feet.X + m.HalfWidth, feet.Y + m.Height(p.State.Crouching), feet.Z + m.HalfWidth);
@@ -305,7 +318,7 @@ public sealed partial class Match
 
         _destroyed.Clear();
         _damaged.Clear();
-        Explosions.DamageBlocks(World, BlockDamage, p.Position, e.BlockRadius, e.BlockDamage, _destroyed, _damaged);
+        Explosions.DamageBlocks(World, BlockDamage, p.Position, e.BlockRadius, e.BlockDamage, _destroyed, _damaged, Zones);
         foreach (var b in _destroyed) RemoveBlock(b.X, b.Y, b.Z);
         foreach (var b in _damaged)
         {

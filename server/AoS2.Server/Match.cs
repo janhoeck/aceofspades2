@@ -52,18 +52,21 @@ public sealed partial class Match
     private readonly NetWriter _scratch = new(1024);
     private readonly NetWriter _snapshotWriter = new(MaxSnapshotBytes);
     private readonly Snapshot _snapshot = new();
-    private int _spawnCounter;
 
-    public Match(GameContent content, IMatchOutput output, ILogger log, int maxPlayers = ServerOptions.MaxPlayersLimit)
+    /// <param name="settings">Regeln des Matches; <c>null</c> = Standard (16 gegen 16 bis 50 Punkte).</param>
+    public Match(GameContent content, IMatchOutput output, ILogger log, MatchSettings? settings = null)
     {
         _content = content;
         _output = output;
         _log = log;
-        _maxPlayers = Math.Min(maxPlayers, ServerOptions.MaxPlayersLimit);
+        _settings = settings ?? new MatchSettings();
+        _maxPlayers = Math.Min(_settings.MaxPlayers, ServerOptions.MaxPlayersLimit);
         var map = content.LoadMap();
         World = map.World;
         Metadata = map.Metadata;
-        Falling = new FallingBlocks(World, content.Movement.Gravity, content.Movement.MaxFallSpeed);
+        Zones = new MapZones(Metadata);
+        Falling = new FallingBlocks(World, content.Movement.Gravity, content.Movement.MaxFallSpeed) { Anchor = Zones.IsAnchor };
+        _info = NewMatchInfo(1);
         BlockDamage = new BlockDamage(World, content.Registry);
         _pose = new PlayerPose(content.Rig);
 
@@ -103,8 +106,9 @@ public sealed partial class Match
     // ---- Beitreten und Verlassen ----
 
     /// <summary>
-    /// Nimmt einen Spieler auf und schickt ihm alles für den Start: Begrüßung (Map-ID, Prüfsumme, Spawn),
-    /// alle Blockänderungen seit Matchbeginn, fallende Gruppen und die anderen Spieler.
+    /// Nimmt einen Spieler auf und schickt ihm alles für den Start: Begrüßung (Map-ID, Prüfsumme, Startpunkt), den Stand
+    /// des Matches, alle Blockänderungen seit Matchbeginn, fallende Gruppen und die anderen Spieler mit Team und Kills.
+    /// Der Neue ist noch in keinem Team: Er schaut über der Mitte der Map zu, bis er eins wählt (<see cref="SelectTeam"/>).
     /// </summary>
     public ServerPlayer AddPlayer(Guid accountId, string name, Action<ServerPlayer>? onCreated = null)
     {
@@ -112,10 +116,10 @@ public sealed partial class Match
         byte id = 0;
         while (_players.ContainsKey(id)) id++;
 
-        var spawn = new PlayerState { Position = Spawns.Pick(World, Metadata, _spawnCounter++) };
+        var spawn = new PlayerState { Position = Spawns.Pick(World, Metadata, Team.None, 0) };
         var player = new ServerPlayer(id, accountId, name, spawn)
         {
-            Health = _content.Combat.Health,
+            Health = 0,
             WeaponsState = WeaponState.Full(_content.Combat),
             AnimationState = PlayerAnimator.Start(_content.Rig, Tick),
         };
@@ -147,6 +151,8 @@ public sealed partial class Match
         WorldEvents.WriteHeader(events);
         _events.Add(id, events);
 
+        // Zuerst der Stand des Matches: Eine neue Matchnummer lässt den Client alles vergessen, was danach kommt nicht.
+        WorldEvents.WriteMatchState(events, _info);
         foreach (var (key, blockId) in _changes)
         {
             Unpack(key, out var x, out var y, out var z);
@@ -162,6 +168,8 @@ public sealed partial class Match
         {
             BeginEvent(id);
             WorldEvents.WritePlayerJoined(_events[id], other.Id, other.Name);
+            if (other.Team != Team.None) WorldEvents.WriteTeamChanged(_events[id], other.Id, other.Team);
+            if (other.Kills != 0 || other.Deaths != 0) WorldEvents.WritePlayerStats(_events[id], other.Id, other.Kills, other.Deaths);
         }
         foreach (var pos in BlockDamage.All())
         {
@@ -210,6 +218,9 @@ public sealed partial class Match
                 case MessageType.BlockEdit:
                     if (player.Edits.Count >= 64) throw new ProtocolException("Zu viele offene Blockaktionen.");
                     player.Edits.Add(new PendingEdit(BlockEditRequest.Read(r), Tick));
+                    return true;
+                case MessageType.TeamSelect:
+                    SelectTeam(player, TeamSelectRequest.Read(r).Team);
                     return true;
                 default:
                     throw new ProtocolException($"Unbekannte Nachricht {(byte)type}.");
@@ -260,10 +271,11 @@ public sealed partial class Match
 
     // ---- Simulation ----
 
-    /// <summary>Ein Server-Tick: Eingaben und Blockaktionen aller Spieler, fallende Blöcke, Snapshots, Ereignisse.</summary>
+    /// <summary>Ein Server-Tick: Matchphase, Eingaben und Blockaktionen aller Spieler, fallende Blöcke, Snapshots, Ereignisse.</summary>
     public void Step()
     {
         Tick++;
+        UpdateMatchPhase();
         RespawnDue();
         foreach (var p in _players.Values)
         {
@@ -271,11 +283,12 @@ public sealed partial class Match
             for (var steps = 0; steps < MaxStepsPerTick && p.Budget > 0 && p.Inputs.Count > 0; steps++)
             {
                 var input = p.Inputs.Dequeue();
-                if (!p.Alive) input.Buttons = InputButtons.None; // Tote schauen nur zu (wie auf dem Client)
+                // Tote und alle nach dem Matchende schauen nur zu (wie auf dem Client).
+                if (!p.Alive || MatchOver) input.Buttons = InputButtons.None;
                 p.Budget--;
                 p.LastProcessedTick++;
-                p.State = PlayerMovement.Step(p.State, input, World, _content.Movement);
-                var fired = WeaponSim.Step(ref p.WeaponsState, input, _content.Combat);
+                p.State = PlayerMovement.Step(p.State, input, World, _content.Movement, Zones.BarriersFor(p.Team));
+                var fired = WeaponSim.Step(ref p.WeaponsState, input, _content.Combat, Zones.InSpawnZone(p.State.Position));
                 p.LastInput = input;
                 p.Remember(p.LastProcessedTick, p.State, input);
                 if (fired != 0) Fire(p, fired, input);
@@ -349,6 +362,7 @@ public sealed partial class Match
             input = p.LastInput;
         }
         if (!p.Alive) return BlockEditResult.Dead;
+        if (MatchOver) return BlockEditResult.MatchOver;
         if (p.LastEditTick is { } last && e.Tick < last + BlockEditing.CooldownTicks) return BlockEditResult.TooFast;
 
         var movement = _content.Movement;
@@ -359,11 +373,11 @@ public sealed partial class Match
         if (e.Kind == BlockEditKind.Remove)
         {
             if (hit.X != e.X || hit.Y != e.Y || hit.Z != e.Z) return BlockEditResult.NoLineOfSight;
-            return BlockEditing.CanRemove(World, _content.Registry, e.X, e.Y, e.Z, hit.Distance);
+            return BlockEditing.CanRemove(World, _content.Registry, e.X, e.Y, e.Z, hit.Distance, Zones);
         }
 
         if (hit.PlaceX != e.X || hit.PlaceY != e.Y || hit.PlaceZ != e.Z) return BlockEditResult.NoLineOfSight;
-        var result = BlockEditing.CanPlace(World, _content.Registry, e.X, e.Y, e.Z, e.BlockId, hit.Distance, state, movement);
+        var result = BlockEditing.CanPlace(World, _content.Registry, e.X, e.Y, e.Z, e.BlockId, hit.Distance, state, movement, Zones);
         if (result != BlockEditResult.Ok) return result;
         foreach (var other in _players.Values)
             if (other != p && PlayerMovement.OverlapsBlock(other.State.Position, movement.HalfWidth, movement.Height(other.State.Crouching), e.X, e.Y, e.Z))
@@ -381,7 +395,7 @@ public sealed partial class Match
         s.Own = to.State;
         s.OwnWeapons = to.WeaponsState;
         s.OwnHealth = (byte)to.Health;
-        s.OwnRespawnTicks = to.Alive ? (ushort)0 : (ushort)Math.Min(to.RespawnAt - Tick, ushort.MaxValue);
+        s.OwnRespawnTicks = to.Alive || to.Team == Team.None || to.RespawnAt <= Tick ? (ushort)0 : (ushort)Math.Min(to.RespawnAt - Tick, ushort.MaxValue);
         s.OwnLife = to.Life;
         s.Players.Clear();
         s.Falling.Clear();

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AoS2.Shared.Maps;
 using AoS2.Shared.Net;
 using AoS2.Shared.Rig;
 using UnityEngine;
@@ -7,7 +8,7 @@ namespace AoS2.Client
 {
     /// <summary>
     /// Merkt sich Kampf-Ereignisse für das HUD: Kill-Anzeige, Trefferanzeige (eigener Treffer vom Server bestätigt),
-    /// erlittener Schaden mit Richtung und wer einen zuletzt getötet hat.
+    /// erlittener Schaden mit Richtung, wer einen zuletzt getötet hat, Meldungen zur Teamwahl.
     /// </summary>
     public sealed class CombatFeed
     {
@@ -17,6 +18,8 @@ namespace AoS2.Client
         {
             public string Killer;
             public string Victim;
+            public Team KillerTeam;
+            public Team VictimTeam;
             public string Weapon;
             public bool Headshot;
             public bool Explosion;
@@ -45,12 +48,31 @@ namespace AoS2.Client
         public string KilledBy { get; private set; }
         public string KilledWith { get; private set; }
 
+        /// <summary>Zuletzt das Team gewechselt (der Tod danach ist kein Kill, der Todesbildschirm sagt es so).</summary>
+        public bool SwitchedTeam { get; set; }
+
+        /// <summary>Nummer des laufenden Matches (0 = noch keins gesehen).</summary>
+        public int MatchNumber { get; set; }
+
+        /// <summary>Meldung zur Teamwahl (z. B. abgelehnt) und wann sie kam.</summary>
+        public string TeamMessage { get; private set; }
+        public float TeamMessageTime { get; private set; } = -100;
+
+        public void ShowTeamMessage(string message)
+        {
+            TeamMessage = message;
+            TeamMessageTime = Time.time;
+        }
+
         public void Clear()
         {
             _kills.Clear();
             LastHitTime = LastDamageTime = -100;
             HitsConfirmed = 0;
             KilledBy = KilledWith = null;
+            SwitchedTeam = false;
+            TeamMessage = null;
+            MatchNumber = 0;
         }
 
         public void OnDamaged(WorldEvent e, byte me, Vector3? attackerPosition)
@@ -70,13 +92,15 @@ namespace AoS2.Client
             }
         }
 
-        public void OnKilled(WorldEvent e, byte me, string victim, string killer, string weapon)
+        public void OnKilled(WorldEvent e, byte me, string victim, string killer, string weapon, Team victimTeam, Team killerTeam)
         {
             _kills.Add(new KillEntry
             {
                 Killer = killer,
                 Victim = victim,
                 Weapon = weapon,
+                VictimTeam = victimTeam,
+                KillerTeam = killerTeam,
                 Headshot = e.Zone == (byte)HitZone.Head,
                 Explosion = e.Zone == WorldEvent.ExplosionZone,
                 Mine = e.PlayerId == me || e.Attacker == me,
@@ -85,6 +109,7 @@ namespace AoS2.Client
             if (_kills.Count > MaxKills) _kills.RemoveAt(0);
             if (e.PlayerId == me)
             {
+                SwitchedTeam = false;
                 KilledBy = e.Attacker == me ? null : killer;
                 KilledWith = weapon;
             }

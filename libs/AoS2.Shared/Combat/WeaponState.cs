@@ -91,7 +91,9 @@ namespace AoS2.Shared.Combat
     public static class WeaponSim
     {
         /// <summary>Rechnet einen Tick. Liefert den Platz der Waffe, die in diesem Tick feuert, sonst 0.</summary>
-        public static int Step(ref WeaponState w, PlayerInput input, CombatSettings settings)
+        /// <param name="blocked">Feuern ist gerade nicht erlaubt (in der Spawnzone): Feuern zählt wie nicht gedrückt, Wechseln und
+        /// Nachladen gehen weiter.</param>
+        public static int Step(ref WeaponState w, PlayerInput input, CombatSettings settings, bool blocked = false)
         {
             var slot = WeaponState.Clamp(input.Weapon, settings);
             if (slot != w.Slot)
@@ -104,7 +106,7 @@ namespace AoS2.Shared.Combat
             if (w.Cooldown > 0) w.Cooldown--;
 
             var weapon = settings.Weapon(w.Slot);
-            var fire = input.Has(InputButtons.Fire);
+            var fire = input.Has(InputButtons.Fire) && !blocked;
             var trigger = fire && (weapon == null || weapon.Automatic || !w.TriggerHeld);
             w.TriggerHeld = fire;
             if (weapon == null) return 0;

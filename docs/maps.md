@@ -45,8 +45,8 @@ Die Namen stehen in `data/blocks.json` (Feld `name`). Fehlt eine Farbe, listet d
   "author": "…",
   "combatZone": { "min": [0, 0, 24], "max": [128, 64, 104] },
   "teams": {
-    "blue":  { "zone": { "min": [50, 0, 4],   "max": [78, 64, 20] },  "spawnPoints": [[60.5, 15, 12.5]] },
-    "green": { "zone": { "min": [50, 0, 108], "max": [78, 64, 124] }, "spawnPoints": [[60.5, 15, 115.5]] }
+    "blue":  { "zone": { "min": [50, 0, 4],   "max": [78, 64, 20] },  "spawnPoints": [[53.5, 15, 9.5], [56.5, 15, 9.5], …] },
+    "green": { "zone": { "min": [50, 0, 108], "max": [78, 64, 124] }, "spawnPoints": [[53.5, 15, 118.5], [56.5, 15, 118.5], …] }
   }
 }
 ```
@@ -56,7 +56,12 @@ Die Namen stehen in `data/blocks.json` (Feld `name`). Fehlt eine Farbe, listet d
 - Spawnpunkte sind die Füße des Spielers (Mitte unten). Auf einem Block, dessen Oberseite auf Höhe 14 liegt, ist der Spawnpunkt also `y = 15`.
 - Der Konverter prüft: Zonen liegen in der Map, Spawnpunkte liegen in ihrer Spawnzone und nicht in Blöcken.
 
-Zonen und Spawnpunkte haben in M3 noch keine Wirkung; das Spiel nutzt den ersten Spawnpunkt als Startpunkt. Die Regeln kommen in M6.
+Seit M6 gelten die Zonen im Spiel ([game-design.md](game-design.md#5-maps--zonen), Technik: [architecture.md](architecture.md#zonen)):
+
+- **Kampfzone:** Nur hier lassen sich Blöcke abbauen, bauen und sprengen. Alles außerhalb bleibt, wie es gebaut wurde.
+- **Spawnzone** je Team: Gegner kommen nicht hinein (unsichtbare Wand), niemand kann darin schießen oder getroffen werden, Schüsse enden an ihrer Grenze. Spawnzone und Kampfzone sollen sich nicht überschneiden; dazwischen darf ein Weg liegen.
+- Spawnzonen **bis zur Höhe der Map** ziehen (`max` y = Höhe): Für Gegner ist die Zone ein fester Quader, auf dem sie sonst stehen könnten.
+- **Spawnpunkte:** so viele, wie ein Team Spieler hat (Standard 16). Der Server verteilt reihum; bei weniger Punkten stehen Spieler nach einem Neustart aufeinander. Die Testmap hat 16 pro Team in zwei Reihen auf jeder Spawn-Plattform.
 
 ## 5. Umwandeln
 

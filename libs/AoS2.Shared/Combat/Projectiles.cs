@@ -1,3 +1,4 @@
+using AoS2.Shared.Maps;
 using AoS2.Shared.Voxels;
 
 namespace AoS2.Shared.Combat
@@ -37,7 +38,8 @@ namespace AoS2.Shared.Combat
         private const float RestSpeed = 0.5f;
 
         /// <summary>Ein Tick. <c>true</c> = explodiert jetzt bei <see cref="Projectile.Position"/>.</summary>
-        public static bool Step(ref Projectile p, WeaponSettings weapon, VoxelWorld world, float dt)
+        /// <param name="zones">Spawnzonen sind für Geschosse Wände (Rakete explodiert davor, Granate prallt ab); <c>null</c> = keine.</param>
+        public static bool Step(ref Projectile p, WeaponSettings weapon, VoxelWorld world, float dt, MapZones zones = null)
         {
             p.Age++;
             p.Velocity.Y -= weapon.Gravity * dt;
@@ -46,7 +48,13 @@ namespace AoS2.Shared.Combat
             if (length > 0)
             {
                 var dir = move * (1 / length);
-                if (VoxelRaycast.Cast(world, p.Position, dir, length, out var hit))
+                var blocked = VoxelRaycast.Cast(world, p.Position, dir, length, out var hit);
+                if (zones != null && zones.Raycast(p.Position, dir, blocked ? hit.Distance : length, out var zoneDistance, out var nx, out var ny, out var nz))
+                {
+                    blocked = true;
+                    hit = new VoxelHit { Distance = zoneDistance, NormalX = nx, NormalY = ny, NormalZ = nz };
+                }
+                if (blocked)
                 {
                     var travel = hit.Distance - SurfaceGap;
                     p.Position = p.Position + dir * (travel > 0 ? travel : 0);

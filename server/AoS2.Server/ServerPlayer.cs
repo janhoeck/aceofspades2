@@ -1,4 +1,5 @@
 using AoS2.Shared.Combat;
+using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Net;
 using AoS2.Shared.Rig;
@@ -74,6 +75,10 @@ public sealed class ServerPlayer
     /// <summary>Zählt die Leben (+1 bei jedem Respawn).</summary>
     public byte Life { get; internal set; }
 
+    /// <summary>Team (<see cref="Team.None"/>: Zuschauer, hat noch keins gewählt).</summary>
+    public Team Team { get; internal set; }
+
+    /// <summary>Kills von Gegnern im laufenden Match.</summary>
     public int Kills { get; internal set; }
     public int Deaths { get; internal set; }
 

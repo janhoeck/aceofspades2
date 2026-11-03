@@ -194,6 +194,38 @@ Folge: Wer auf das zielt, was er sieht, trifft. Der Getroffene kann dabei schon 
 
 **Snapshot-Größe:** Ein anderer Spieler braucht bis zu 28 Byte. Bis etwa 33 Spieler passen alle in ein Paket (unter 1000 Byte); bei mehr Spielern kommen sie reihum dran und werden über längere Lücken interpoliert (der Lag-Ausgleich ist dann leicht ungenauer). Für 48 Spieler wären kompaktere Positionen nötig (M9).
 
+### Team Deathmatch (seit M6)
+
+| Teil | Wo | Aufgabe |
+|---|---|---|
+| Zonen | `AoS2.Shared/Maps/MapZones.cs` | Welche Blöcke änderbar sind, wer in einer Spawnzone steht, welche Zonen für ein Team Wände sind, wo ein Strahl auf eine Zonengrenze trifft (Abschnitt 5, Zonen) |
+| Match | `server/AoS2.Server/Match.Teams.cs` | Teamwahl und Ausgleich, Punkte, Matchende, Zeitlimit, Neustart |
+| Regeln | `MatchSettings` aus der Server-Config (`ServerOptions`, Datei `server.json`) | Spieler pro Team, Punkteziel, Zeitlimit, Pause nach dem Matchende, Teambeschuss |
+| Protokoll | `AoS2.Shared/Net/MatchMessages.cs`, Ereignisse 14–17 | `TeamSelectRequest` (Client → Server), `TeamChanged`, `PlayerStats`, `MatchState` (`MatchInfo`), `TeamDenied` |
+| Client | `ClientSession` (`Team`, `Match`, `Kills`/`Deaths`, `RequestTeam`), Unity: `GameClient` (Team-Menü), `Hud`, `RemotePlayersView` (Teamfarben) | Anzeige |
+
+**Ablauf, Schritt für Schritt:**
+1. Wer beitritt, ist Zuschauer: Team `None`, tot, ohne Respawn-Zeit, über der Mitte der Map. Der Client öffnet das Team-Menü.
+2. Der Client schickt `TeamSelectRequest` (zuverlässig). Der Server prüft die Ausgleichsregel und antwortet allen mit `TeamChanged` oder nur dem Absender mit `TeamDenied` (voll, unausgeglichen, schon drin). Ein Zuschauer spawnt sofort an einem Spawnpunkt seines Teams (reihum); wer wechselt, stirbt ohne Tod in der Statistik und spawnt nach der Respawn-Zeit im neuen Team.
+3. Ein Kill eines Gegners zählt für den Schützen und sein Team. Danach gehen `PlayerStats` (Kills/Tode von Opfer und Schütze) und `MatchState` (Punkte) an alle. Selbstmord und Teamkill geben keinen Punkt.
+4. Erreicht ein Team das Punkteziel oder läuft das Zeitlimit ab, wird die Phase `Ended`: `MatchState` mit Sieger und dem Server-Tick des Neustarts. Server **und** Client werten dann alle Tasten als nicht gedrückt (wie bei Toten), Blockänderungen lehnt der Server mit `MatchOver` ab, Schaden gibt es keinen.
+5. Neustart: Der Server schickt zuerst `MatchState` mit der nächsten Matchnummer (der Client vergisst daraufhin Geschosse, fallende Gruppen, Risse, Kills und Tode), dann für jeden seit Matchbeginn geänderten Block den Stand aus der Map-Datei als `BlockSet`. Danach spawnen alle Spieler mit Team neu. So braucht der Neustart keine eigene Nachricht für die Welt und funktioniert für alle, die gerade verbunden sind.
+6. Wer später beitritt, bekommt bei der Synchronisation zuerst `MatchState`, dann wie bisher die Welt und für jeden anderen Spieler `PlayerJoined`, `TeamChanged` und `PlayerStats`.
+
+Ohne Spieler in Teams steht die Uhr des Zeitlimits (ein leerer Server spielt keine Matches durch). Teams werden beim Neustart nicht gemischt; wer geht, hinterlässt eine Lücke, die neue Spieler über das Menü füllen.
+
+**Protokollversion 3** (M6): neue Nachricht und neue Ereignisse, `Team` als Byte (0 = keins, 1 = Blau, 2 = Grün).
+
+**Last (gemessen mit `tools/AoS2.LoadTest`: Bots über UDP auf localhost, Server im selben Prozess, Release-Build, Entwicklungsrechner, je 20 s):**
+
+| Spieler | Tick-Rate | Rechenzeit pro Tick Ø / 99 % / max | Snapshot Ø / max | Download pro Client | Upload Server gesamt |
+|---|---|---|---|---|---|
+| 8 | 60/s | 0,06 / 0,55 / 11,8 ms | 230 / 258 Byte | 8,5 kB/s (68 kbit/s) | 0,56 Mbit/s |
+| 16 | 60/s | 0,05 / 0,68 / 3,3 ms | 421 / 482 Byte | 14,8 kB/s (119 kbit/s) | 1,9 Mbit/s |
+| 32 | 60/s | 0,15 / 1,4 / 6,0 ms | 805 / 930 Byte | 27,7 kB/s (222 kbit/s) | 7,3 Mbit/s |
+
+Die Rechenzeit ist kein Problem (Budget 16,7 ms pro Tick). Die Bandbreite wächst mit dem Quadrat der Spielerzahl (jeder bekommt jeden), bei 32 Spielern also gut 7 Mbit/s Upload für den Server. Für einen Server im Rechenzentrum ist das wenig, für einen Heim-Anschluss viel. Kompaktere Positionen und weniger Snapshots für ferne Spieler sind Teil von M9. Die Bots kämpfen dabei ständig (gut 2 Kills/s), das ist mehr als im echten Spiel.
+
 ## 4. Voxel-Welt
 
 ### Daten
@@ -229,7 +261,7 @@ Der Client zeigt Abbauen und Bauen vorab an und nimmt die Änderung wieder weg, 
 
 **Blockschaden (seit M5):** Kugeln (`blockDamage` je Treffer) und Explosionen ziehen Lebenspunkte ab (`health` in `blocks.json`). Gespeichert wird nur für beschädigte Blöcke (`BlockDamage`); ändert sich ein Block, ist sein Schaden vergessen. Clients bekommen den Schaden als Stufe 1 … 255 und zeigen vier Stufen Risse. Wer später beitritt, bekommt alle beschädigten Blöcke mit. Zerstörte Blöcke verschwinden wie beim Abbauen und können Gruppen fallen lassen.
 
-Die Regeln (Reichweite 5 Blöcke, 0,2 s Pause, unzerstörbare Blöcke, nicht in den eigenen Quader bauen) stehen in `AoS2.Shared/Voxels/BlockEditing.cs`. Client (vorab) und Server (verbindlich) prüfen dieselben Regeln; nur der Server prüft zusätzlich Sichtlinie, Pause und andere Spieler im Weg. Zonen und Blockvorrat kommen mit M6.
+Die Regeln (Reichweite 5 Blöcke, 0,2 s Pause, unzerstörbare Blöcke, nicht in den eigenen Quader bauen) stehen in `AoS2.Shared/Voxels/BlockEditing.cs`. Client (vorab) und Server (verbindlich) prüfen dieselben Regeln; nur der Server prüft zusätzlich Sichtlinie, Pause und andere Spieler im Weg. Seit M6 gehören die Zonen dazu (`ProtectedZone`, Abschnitt 5) und nach dem Matchende `MatchOver`. Ein Blockvorrat ist noch offen.
 
 ### Fallende Blöcke
 
@@ -273,6 +305,18 @@ Kampf- und Spawnzonen sind Quader in den Metadaten. Der Server erzwingt:
 - keine Blockänderungen in Spawnzonen (auch nicht durch Explosionen)
 - Gegner kommen nicht hinein (Kollision im gemeinsamen Bewegungscode, damit die Vorhersage sie kennt)
 - keine Waffenbenutzung im Spawn, Geschosse werden an der Zonengrenze gestoppt
+
+**Umsetzung (seit M6):** Alle Regeln stehen in `AoS2.Shared/Maps/MapZones.cs` und werden auf beiden Seiten mit demselben Code gerechnet:
+
+| Regel | Wie |
+|---|---|
+| Blöcke | `CanEditBlock`: nur in der Kampfzone (ohne Kampfzone überall) und nie in einer Spawnzone. Gilt für Abbauen/Bauen (`BlockEditing`, Ergebnis `ProtectedZone`), Gewehrschäden und Explosionen (`Explosions.DamageBlocks`). Unveränderliche Blöcke verankern schwebende Gruppen wie der Boden (`FallingBlocks.Anchor`), sonst könnte man den Spawn „von außen“ zum Einsturz bringen. |
+| Gegner | `PlayerMovement.Step(…, barriers)`: Die Spawnzone des Gegners zählt für die Kollision wie feste Blöcke (`BarriersFor(team)`). Weil der Bewegungscode deterministisch und gemeinsam ist, sagt der Client die Wand richtig voraus, es gibt keine Korrektur. Wer schon in der Zone steckt (Teamwechsel), für den zählt sie nicht, bis er draußen ist. |
+| Waffen | `WeaponSim.Step(…, blocked)`: Steht der Fußpunkt in einer Spawnzone, zählt Feuern als nicht gedrückt (Wechseln und Nachladen gehen). Client und Server rechnen es aus derselben Position. |
+| Schüsse | Hitscan: `MapZones.Raycast` kürzt den Strahl an der ersten Zonengrenze (die Zone, in der der Schütze steht, zählt nicht). Geschosse: `ProjectileSim.Step(…, zones)` behandelt Spawnzonen wie Wände (Rakete explodiert, Granate prallt ab), auch in der Bahnberechnung des Clients. |
+| Schaden | Wer mit dem Fußpunkt in einer Spawnzone steht, bekommt keinen Schaden (auch nicht von einer Explosion an der Grenze). |
+
+Eine Spawnzone sollte bis zur Höhe der Map reichen: Für Gegner ist sie ein fester Quader, auf dem sie sonst stehen könnten. Der Test `TestMap_HasSpawnZonesAndPointsForTwoFullTeams` prüft das für die Testmap (16 Spawnpunkte pro Team).
 
 ## 6. Accounts & Discord-Login
 
@@ -330,6 +374,7 @@ So kann ein Community-Server die Identität eines Spielers prüfen, ohne ihm Zug
 - Der Client lädt die Serverliste vom Backend und misst den Ping direkt zum Server.
 - Server mit inkompatibler Protokollversion werden ausgeblendet.
 - Self-Hoster bekommen den Server als **Windows-/Linux-Download** (GitHub Releases) und als **Docker-Image** (GitHub Container Registry), dazu eine Beispiel-Config.
+- **Config-Datei (seit M6):** JSON mit Kommentaren, `server/AoS2.Server/server.example.json` liegt neben der exe. Ein Objekt mit flachen Einträgen (`name`, `port`, `map`, `playersPerTeam`, `scoreLimit`, `timeLimitMinutes`, `matchEndSeconds`, `friendlyFire`, `site`, `address`, `dev`, optional `data`/`maps`), Start mit `--config server.json`; Werte auf der Kommandozeile gelten vor der Datei. Unbekannte Einträge sind ein Fehler (gegen Tippfehler). So kann ein Docker-Image die Datei einfach einbinden, und M7 ergänzt nur Einträge (z. B. Heartbeat, Server-Schlüssel), ohne das Format zu ändern. `name` ist schon da, damit Server-Betreiber ihn jetzt setzen können.
 - **Offen:** Brauchen Self-Hoster einen Server-Schlüssel aus ihrem Account (verhindert Spam in der Liste)?
 - Community-Server sind nicht vertrauenswürdig. Sollte es später Statistiken/Ranglisten geben, zählen nur offizielle Server.
 

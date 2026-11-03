@@ -1,4 +1,5 @@
 using AoS2.Shared.Combat;
+using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Voxels;
 
@@ -28,17 +29,23 @@ namespace AoS2.Shared.Net.Client
         private readonly VoxelWorld _world;
         private readonly MovementSettings _settings;
         private readonly CombatSettings _combat;
+        private readonly MapZones _zones;
 
         /// <param name="combat">Waffenwerte; <c>null</c> = ohne Waffen (nur Bewegung).</param>
-        public ClientPrediction(VoxelWorld world, MovementSettings settings, PlayerState start, CombatSettings combat = null)
+        /// <param name="zones">Zonen der Map (unsichtbare Wände, kein Feuern im Spawn); <c>null</c> = keine.</param>
+        public ClientPrediction(VoxelWorld world, MovementSettings settings, PlayerState start, CombatSettings combat = null, MapZones zones = null)
         {
             _world = world;
             _settings = settings;
             _combat = combat;
+            _zones = zones ?? MapZones.None;
             State = start;
             _states[0] = start;
             if (combat != null) Weapons = _weapons[0] = WeaponState.Full(combat);
         }
+
+        /// <summary>Eigenes Team: Die Spawnzone des Gegners ist eine Wand (wie auf dem Server).</summary>
+        public Team Team { get; set; }
 
         /// <summary>Vorhergesagter Zustand nach der Eingabe <see cref="Tick"/>.</summary>
         public PlayerState State { get; private set; }
@@ -74,8 +81,8 @@ namespace AoS2.Shared.Net.Client
 
         private PlayerState Simulate(PlayerState state, ref WeaponState weapons, PlayerInput input, out int firedSlot)
         {
-            state = PlayerMovement.Step(state, input, _world, _settings);
-            firedSlot = _combat != null ? WeaponSim.Step(ref weapons, input, _combat) : 0;
+            state = PlayerMovement.Step(state, input, _world, _settings, _zones.BarriersFor(Team));
+            firedSlot = _combat != null ? WeaponSim.Step(ref weapons, input, _combat, _zones.InSpawnZone(state.Position)) : 0;
             return state;
         }
 

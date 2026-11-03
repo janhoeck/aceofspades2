@@ -28,9 +28,9 @@ public sealed class GameServer : INetEventListener, IMatchOutput, IDisposable
     private readonly ConcurrentQueue<(ConnectionRequest Request, JoinTicket? Ticket)> _validated = new();
     private int _pendingJoins;
 
-    public GameServer(GameContent content, int maxPlayers, TicketCheck tickets, ILogger log)
+    public GameServer(GameContent content, MatchSettings settings, TicketCheck tickets, ILogger log)
     {
-        Match = new Match(content, this, log, maxPlayers);
+        Match = new Match(content, this, log, settings);
         _tickets = tickets;
         _log = log;
         _net = new NetManager(this)
@@ -39,10 +39,19 @@ public sealed class GameServer : INetEventListener, IMatchOutput, IDisposable
             DisconnectTimeout = 10_000,
             UpdateTime = 5,
             ChannelsCount = 1,
+            EnableStatistics = true, // Bytes und Pakete auf der Leitung (Log, Lasttest)
         };
     }
 
     public Match Match { get; }
+
+    /// <summary>Tick-Dauer und verschickte Daten (für das Log und den Lasttest).</summary>
+    public ServerStats Stats { get; set; } = new();
+
+    /// <summary>Gesendete Bytes und Pakete auf der Leitung (mit LiteNetLib-Kopfdaten und Bestätigungen, ohne UDP/IP-Kopf).</summary>
+    public (long Bytes, long Packets) WireSent => (_net.Statistics.BytesSent, _net.Statistics.PacketsSent);
+
+    public (long Bytes, long Packets) WireReceived => (_net.Statistics.BytesReceived, _net.Statistics.PacketsReceived);
 
     /// <summary>Tatsächlicher Port (bei Port 0 vom Betriebssystem gewählt, für Tests).</summary>
     public int Port => _net.LocalPort;
@@ -224,8 +233,9 @@ public sealed class GameServer : INetEventListener, IMatchOutput, IDisposable
 
     void IMatchOutput.Send(byte playerId, NetWriter message, Delivery delivery)
     {
-        if (_peers.TryGetValue(playerId, out var peer))
-            peer.Send(message.Buffer, 0, message.Length, ToLiteNetLib(delivery));
+        if (!_peers.TryGetValue(playerId, out var peer)) return;
+        peer.Send(message.Buffer, 0, message.Length, ToLiteNetLib(delivery));
+        Stats.RecordSend(message.Length, delivery);
     }
 
     internal static DeliveryMethod ToLiteNetLib(Delivery delivery) => delivery switch

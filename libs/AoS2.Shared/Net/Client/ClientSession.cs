@@ -45,6 +45,12 @@ namespace AoS2.Shared.Net.Client
 
         /// <summary>Erst wenn ein Snapshot mit diesem Spieler kam, gibt es etwas zu zeigen.</summary>
         public bool HasState { get; internal set; }
+
+        /// <summary>Team (<see cref="Team.None"/>: wählt noch).</summary>
+        public Team Team { get; internal set; }
+
+        public int Kills { get; internal set; }
+        public int Deaths { get; internal set; }
     }
 
     /// <summary>
@@ -129,6 +135,44 @@ namespace AoS2.Shared.Net.Client
 
         /// <summary>Der Server hat eine eigene Blockänderung abgelehnt (sie ist schon wieder zurückgenommen).</summary>
         public event Action<BlockEditResult> EditRejected;
+
+        // ---- Team Deathmatch ----
+
+        /// <summary>Zonen der Map (Spawnzonen, Kampfzone).</summary>
+        public MapZones Zones { get; private set; }
+
+        /// <summary>Eigenes Team (<see cref="Team.None"/>: noch keins gewählt, man schaut zu).</summary>
+        public Team Team { get; private set; }
+
+        public int Kills { get; private set; }
+        public int Deaths { get; private set; }
+
+        /// <summary>Stand des Matches laut Server (Punkte, Phase, Regeln).</summary>
+        public MatchInfo Match { get; private set; }
+
+        /// <summary>Das Match ist vorbei (Ergebnis-Anzeige bis zum Neustart): niemand kann kämpfen oder bauen.</summary>
+        public bool MatchOver => Match.Phase == MatchPhase.Ended;
+
+        /// <summary>Team-Ereignisse für die Anzeige: Teamwechsel, Stand des Matches, abgelehnter Teamwunsch, Kills/Tode.</summary>
+        public event Action<WorldEvent> MatchEvent;
+
+        /// <summary>Spieler im Team (ohne Zuschauer), den eigenen mitgezählt.</summary>
+        public int TeamSize(Team team)
+        {
+            var count = Team == team && team != Team.None ? 1 : 0;
+            foreach (var p in _players.Values)
+                if (p.Team == team) count++;
+            return count;
+        }
+
+        /// <summary>Team wählen (<see cref="Team.None"/> = automatisch). Der Server antwortet mit einem Teamwechsel oder einer Ablehnung.</summary>
+        public void RequestTeam(Team team)
+        {
+            if (Phase != ClientPhase.Playing) return;
+            _writer.Clear();
+            new TeamSelectRequest { Team = team }.Write(_writer);
+            _sender.Send(_writer, Delivery.ReliableOrdered);
+        }
 
         /// <summary>Verschiebung des eigenen Spielers durch Abgleiche seit dem letzten Aufruf. Die Anzeige gleicht sie weich aus.</summary>
         public Vec3 TakeCorrection()
@@ -222,9 +266,10 @@ namespace AoS2.Shared.Net.Client
             Metadata = map.Metadata;
             Blocks = new PredictedBlocks(World);
             Falling = new NetFallingGroups(Blocks);
-            Prediction = new ClientPrediction(World, Movement, welcome.Spawn, Combat);
-            Projectiles = new NetProjectiles(World, Combat, Movement.DeltaTime);
-            Health = Combat?.Health ?? 100;
+            Zones = new MapZones(Metadata);
+            Prediction = new ClientPrediction(World, Movement, welcome.Spawn, Combat, Zones);
+            Projectiles = new NetProjectiles(World, Combat, Movement.DeltaTime, Zones);
+            Health = 0; // Neu Beigetretene schauen zu, bis sie ein Team gewählt haben (der Snapshot bestätigt es)
             World.BlockChanged += (x, y, z, _, __) => _blockDamage.Remove(new BlockPos(x, y, z));
             Clock = new ServerClock(welcome.TickRate);
             LastSnapshotTick = welcome.ServerTick;
@@ -304,7 +349,50 @@ namespace AoS2.Shared.Net.Client
                     Projectiles.Explode(e.ProjectileId);
                     CombatEvent?.Invoke(e);
                     break;
+                case WorldEventType.TeamChanged:
+                    if (e.PlayerId == PlayerId)
+                    {
+                        Team = e.Team;
+                        Prediction.Team = e.Team;
+                    }
+                    else if (_players.TryGetValue(e.PlayerId, out var changed)) changed.Team = e.Team;
+                    MatchEvent?.Invoke(e);
+                    break;
+                case WorldEventType.PlayerStats:
+                    if (e.PlayerId == PlayerId)
+                    {
+                        Kills = e.Kills;
+                        Deaths = e.Deaths;
+                    }
+                    else if (_players.TryGetValue(e.PlayerId, out var stats))
+                    {
+                        stats.Kills = e.Kills;
+                        stats.Deaths = e.Deaths;
+                    }
+                    MatchEvent?.Invoke(e);
+                    break;
+                case WorldEventType.MatchState:
+                    if (e.Match.MatchNumber != Match.MatchNumber) StartNewMatch();
+                    Match = e.Match;
+                    MatchEvent?.Invoke(e);
+                    break;
+                case WorldEventType.TeamDenied:
+                    MatchEvent?.Invoke(e);
+                    break;
             }
+        }
+
+        /// <summary>
+        /// Neustart: Geschosse, fallende Gruppen, Blockschaden und Kills/Tode vergessen. Die Blöcke setzt der Server mit
+        /// Blockänderungen gleich danach auf den Stand der Map zurück.
+        /// </summary>
+        private void StartNewMatch()
+        {
+            Projectiles.Clear();
+            Falling.Clear();
+            _blockDamage.Clear();
+            Kills = Deaths = 0;
+            foreach (var p in _players.Values) p.Kills = p.Deaths = 0;
         }
 
         // ---- Senden ----
@@ -313,12 +401,12 @@ namespace AoS2.Shared.Net.Client
         /// Ein Simulationsschritt des eigenen Spielers: vorhersagen und die Eingabe an den Server schicken.
         /// Liefert den Platz der Waffe, die in diesem Tick feuert (0 = keine), damit die Anzeige Mündungsfeuer zeigen kann.
         /// Beim Feuern geht der gerade gezeigte Zeitpunkt (<see cref="RenderTick"/>) mit: Gegen ihn prüft der Server den Treffer.
-        /// Tot zählen nur Blickrichtung und Waffenwahl (wie auf dem Server).
+        /// Tot und nach dem Matchende zählen nur Blickrichtung und Waffenwahl (wie auf dem Server).
         /// </summary>
         public int Tick(PlayerInput input)
         {
             if (Phase != ClientPhase.Playing) return 0;
-            if (!Alive) input.Buttons = InputButtons.None;
+            if (!Alive || MatchOver) input.Buttons = InputButtons.None;
             if (input.Has(InputButtons.Fire)) input.ViewTick = RenderTick;
             Prediction.Step(input, out var fired);
             Prediction.FillInputPacket(_inputPacket);
@@ -333,7 +421,8 @@ namespace AoS2.Shared.Net.Client
         {
             if (Phase != ClientPhase.Playing) return BlockEditResult.OutOfReach;
             if (!Alive) return BlockEditResult.Dead;
-            var result = BlockEditing.CanRemove(World, Registry, x, y, z, distance);
+            if (MatchOver) return BlockEditResult.MatchOver;
+            var result = BlockEditing.CanRemove(World, Registry, x, y, z, distance, Zones);
             if (result == BlockEditResult.Ok) SendEdit(BlockEditKind.Remove, x, y, z, BlockRegistry.Air);
             return result;
         }
@@ -342,7 +431,8 @@ namespace AoS2.Shared.Net.Client
         {
             if (Phase != ClientPhase.Playing) return BlockEditResult.OutOfReach;
             if (!Alive) return BlockEditResult.Dead;
-            var result = BlockEditing.CanPlace(World, Registry, x, y, z, id, distance, Prediction.State, Movement);
+            if (MatchOver) return BlockEditResult.MatchOver;
+            var result = BlockEditing.CanPlace(World, Registry, x, y, z, id, distance, Prediction.State, Movement, Zones);
             if (result == BlockEditResult.Ok) SendEdit(BlockEditKind.Place, x, y, z, id);
             return result;
         }

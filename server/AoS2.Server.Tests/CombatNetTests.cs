@@ -20,7 +20,7 @@ public class CombatNetTests
         var net = new SimulatedNetwork { OneWayLatency = latency };
         var a = net.Join("Anna");
         var b = net.Join("Ben");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing && b.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready && b.Ready));
         net.Teleport(a, posA);
         net.Teleport(b, posB);
         net.Run(0.5);
@@ -143,7 +143,7 @@ public class CombatNetTests
         Assert.True(Vec3.Distance(b.State.Position, serverB.State.Position) < 0.01f, "Client ist mit zum Spawn gesprungen");
         var seen = a.Session.RemotePlayers[b.PlayerId].Current;
         Assert.True(seen.Alive);
-        Assert.Equal(1, seen.Life);
+        Assert.Equal(2, seen.Life); // erstes Leben beim Teambeitritt, zweites nach dem Respawn
         Assert.True(Vec3.Distance(seen.Position, serverB.State.Position) < 0.01f);
     }
 
@@ -201,7 +201,7 @@ public class CombatNetTests
     [Fact]
     public void Rocket_AtPillar_DestroysBlocks_BeamFalls_SameEverywhere()
     {
-        var (net, a, b) = Duel(new Vec3(20.5f, 4, 16.5f), new Vec3(40.5f, 4, 40.5f));
+        var (net, a, b) = Duel(new Vec3(20.5f, 4, 18.5f), new Vec3(40.5f, 4, 40.5f)); // schräg, an den Spawnzonen (z 16…17) vorbei
         a.Input.Weapon = Rocket;
         net.Run(0.5);
         Aim(a, new Vec3(14f, 7.5f, 16.5f)); // Verbindungsblock (13, 7, 16) von vorn
@@ -238,7 +238,7 @@ public class CombatNetTests
     [Fact]
     public void Rifle_ShootsBlockToPieces_PillarTopFalls()
     {
-        var (net, a, b) = Duel(new Vec3(17.5f, 4, 16.5f), new Vec3(40.5f, 4, 40.5f));
+        var (net, a, b) = Duel(new Vec3(17.5f, 4, 18.5f), new Vec3(40.5f, 4, 40.5f));
         a.Input.Weapon = Rifle;
         net.Run(0.5);
         Aim(a, new Vec3(14f, 5.5f, 16.5f)); // Säule (13, 5, 16)
@@ -260,7 +260,7 @@ public class CombatNetTests
     [Fact]
     public void LateJoiner_GetsBlockDamageAndFlyingProjectiles()
     {
-        var (net, a, _) = Duel(new Vec3(17.5f, 4, 16.5f), new Vec3(40.5f, 4, 40.5f));
+        var (net, a, _) = Duel(new Vec3(17.5f, 4, 18.5f), new Vec3(40.5f, 4, 40.5f));
         a.Input.Weapon = Rifle;
         net.Run(0.5);
         Aim(a, new Vec3(14f, 5.5f, 16.5f));
@@ -274,7 +274,7 @@ public class CombatNetTests
         Assert.Single(net.Match.Projectiles);
 
         var c = net.Join("Carla");
-        Assert.True(net.RunUntil(() => c.Session.Phase == ClientPhase.Playing, 1));
+        Assert.True(net.RunUntil(() => c.Ready, 1));
         Assert.True(c.Session.BlockDamage.ContainsKey(new BlockPos(13, 5, 16)));
         Assert.Single(c.Session.Projectiles.All);
         net.Run(0.1);
@@ -288,7 +288,7 @@ public class CombatNetTests
         var net = new SimulatedNetwork(seed: 7) { OneWayLatency = 0.06, Jitter = 0.03, Loss = 0.15 };
         var a = net.Join("Anna");
         var b = net.Join("Ben");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing && b.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready && b.Ready));
         var frame = 0;
         net.Run(3, () =>
         {

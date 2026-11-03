@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AoS2.Server\AoS2.Server.csproj" />
     <ProjectReference Include="..\..\libs\AoS2.Net\AoS2.Net.csproj" />
+    <ProjectReference Include="..\..\tools\AoS2.LoadTest\AoS2.LoadTest.csproj" />
   </ItemGroup>
 
   <ItemGroup>

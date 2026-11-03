@@ -35,6 +35,9 @@ namespace AoS2.Client.Tests
         private ClientSession _other;
         private double _otherNextTick;
         private PlayerInput _otherInput;
+        private Team _otherTeam;
+        private bool _otherTeamRequested;
+        private string _config;
 
         [UnitySetUp]
         public IEnumerator StartServerAndConnect()
@@ -42,7 +45,11 @@ namespace AoS2.Client.Tests
             var dll = FindServer();
             if (dll == null) Assert.Ignore("Server nicht gebaut (dotnet build server/AoS2.Server).");
             _port = FreeUdpPort();
-            _server = Process.Start(new ProcessStartInfo("dotnet", $"\"{dll}\" --dev --port {_port}")
+            // Server-Config wie beim Self-Hosting. Im Match-Test gewinnt schon ein Punkt, danach kurze Pause bis zum Neustart.
+            var scoreLimit = TestContext.CurrentContext.Test.Name.Contains("WinsMatch") ? 1 : 50;
+            _config = Path.Combine(Path.GetTempPath(), $"aos2-playmode-{_port}.json");
+            File.WriteAllText(_config, "{ \"dev\": true, \"port\": " + _port + ", \"scoreLimit\": " + scoreLimit + ", \"matchEndSeconds\": 3 }");
+            _server = Process.Start(new ProcessStartInfo("dotnet", $"\"{dll}\" --config \"{_config}\"")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -72,6 +79,18 @@ namespace AoS2.Client.Tests
             }
             Assert.IsTrue(_game.IsReady, "verbunden: " + _game.Status);
             Assert.AreEqual(GameMode.Online, _game.Mode);
+
+            // M6: Nach dem Beitritt ist man Zuschauer, das Team-Menü ist offen. Blau wählen: Man erscheint im blauen Spawn.
+            Assert.IsTrue(_game.TeamMenuOpen, "Team-Menü nach dem Beitritt");
+            Assert.AreEqual(Team.None, _game.Session.Team);
+            _game.ChooseTeam(Team.Blue);
+            timeout = Time.realtimeSinceStartup + 5f;
+            while ((_game.Session.Team != Team.Blue || !_game.Session.Alive) && Time.realtimeSinceStartup < timeout) yield return null;
+            Assert.AreEqual(Team.Blue, _game.Session.Team);
+            Assert.IsTrue(_game.Session.Alive, "gespawnt");
+            Assert.IsFalse(_game.TeamMenuOpen, "Menü schließt nach der Wahl");
+            yield return null;
+            Assert.IsTrue(_game.Session.Zones.InSpawnZone(_game.Player.State.Position), "im eigenen Spawn");
         }
 
         [UnityTearDown]
@@ -83,20 +102,19 @@ namespace AoS2.Client.Tests
             yield return null;
             if (_server != null && !_server.HasExited) _server.Kill();
             _server?.Dispose();
+            if (_config != null && File.Exists(_config)) File.Delete(_config);
         }
 
         [UnityTest]
         public IEnumerator Online_MovementAndBlocks_ReachOtherClient()
         {
-            ConnectOtherClient();
-            var timeout = Time.realtimeSinceStartup + 10f;
-            while ((_other.Phase != ClientPhase.Playing || _game.Session.RemotePlayers.Count == 0) && Time.realtimeSinceStartup < timeout)
-            {
-                UpdateOther();
-                yield return null;
-            }
-            Assert.AreEqual(ClientPhase.Playing, _other.Phase, _other.Error);
+            ConnectOtherClient(Team.Green);
+            yield return WaitForOther();
             Assert.AreEqual(1, _game.Session.RemotePlayers.Count, "die Spielszene sieht den zweiten Client");
+
+            // Im Spawn darf man nichts bauen; dafür erst in die Kampfzone laufen, dem anderen entgegen.
+            yield return MeetInTheMiddle();
+            var mispredictions = _game.Session.Prediction.Mispredictions; // der Sprung zum Spawn beim Teambeitritt zählt nicht
 
             // Unity-Spieler läuft eine Sekunde vorwärts.
             var start = _game.Player.State.Position;
@@ -109,7 +127,7 @@ namespace AoS2.Client.Tests
             Assert.Greater(Distance(start, moved), 2f, "gelaufen");
             Assert.IsTrue(_other.RemotePlayers.TryGetValue(_game.Session.PlayerId, out var seen));
             Assert.Less(Distance(seen.Current.Position, moved), 0.01f, "der andere Client sieht den Unity-Spieler dort, wo er steht");
-            Assert.AreEqual(0, _game.Session.Prediction.Mispredictions, "Vorhersage stimmte immer");
+            Assert.AreEqual(mispredictions, _game.Session.Prediction.Mispredictions, "Vorhersage stimmte immer");
             Assert.AreEqual(1, _game.RemotePlayers.Count, "Avatar des anderen wird gezeigt");
 
             // Zum anderen Spieler schauen und ein Bild machen (artifacts/screenshots/m4-online.png).
@@ -147,16 +165,22 @@ namespace AoS2.Client.Tests
         [UnityTest]
         public IEnumerator Online_ShootOtherPlayer_UntilKilled_ThenRespawn()
         {
-            ConnectOtherClient();
+            ConnectOtherClient(Team.Green);
             var kills = new List<WorldEvent>();
             _other.CombatEvent += e => { if (e.Type == WorldEventType.PlayerKilled) kills.Add(e); };
-            var timeout = Time.realtimeSinceStartup + 10f;
-            while ((_other.Phase != ClientPhase.Playing || _game.RemotePlayers.Count == 0) && Time.realtimeSinceStartup < timeout)
-            {
-                UpdateOther();
-                yield return null;
-            }
+            yield return WaitForOther();
             Assert.AreEqual(1, _game.RemotePlayers.Count, "Spielermodell des anderen wird gezeigt");
+
+            // Im Spawn feuert keine Waffe: erst hinaus, dem Gegner entgegen.
+            _game.Player.TestSelectSlot(1);
+            yield return Run(0.5f);
+            _game.Player.TestFire(true);
+            yield return Run(0.3f);
+            _game.Player.TestFire(false);
+            Assert.AreEqual(0, _game.Player.ShotsFired, "im Spawn kein Schuss");
+            yield return MeetInTheMiddle();
+            var mispredictions = _game.Session.Prediction.Mispredictions;
+            var timeout = 0f;
 
             // Der andere hält ebenfalls das Gewehr und schaut zum Unity-Spieler: Zielhaltung im Bild.
             var me = _game.Player.State.Position;
@@ -185,7 +209,7 @@ namespace AoS2.Client.Tests
             yield return Run(0.3f);
             Assert.GreaterOrEqual(_game.Feed.HitsConfirmed, 4, "Trefferanzeige: Server hat die Treffer bestätigt");
             Assert.AreEqual(1, _game.Feed.Kills.Count, "Kill-Anzeige");
-            Assert.AreEqual(0, _game.Session.Prediction.Mispredictions, "Waffen-Vorhersage stimmte");
+            Assert.AreEqual(mispredictions, _game.Session.Prediction.Mispredictions, "Waffen-Vorhersage stimmte");
             Assert.Less(_game.Session.Prediction.Weapons.GetAmmo(1).Magazine, 30);
             Assert.AreEqual(0, _game.RemotePlayers.Avatars.Count(), "Tote werden ausgeblendet");
             yield return Screenshot("m5-kill");
@@ -214,6 +238,70 @@ namespace AoS2.Client.Tests
             Assert.AreEqual(100, _other.Health);
         }
 
+        /// <summary>
+        /// M6, ein ganzes Match (die Server-Config setzt das Punkteziel auf 1): Blau gegen Grün, beide laufen aus ihrem Spawn
+        /// aufeinander zu, der Unity-Spieler schießt den Gegner ab. Der Punkt beendet das Match, beide Clients zeigen den Sieger,
+        /// nach 3 s beginnt das nächste Match mit 0 : 0 und alle stehen wieder im Spawn. Bilder: artifacts/screenshots/m6-*.png.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Online_BlueVsGreen_KillWinsMatch_ThenRestart()
+        {
+            ConnectOtherClient(Team.Green);
+            yield return WaitForOther();
+            Assert.AreEqual(Team.Green, _game.Session.RemotePlayers[_other.PlayerId].Team);
+            Assert.AreEqual(Team.Green, _game.RemotePlayers.ShownTeam(_other.PlayerId), "Gegner in Grün");
+            Assert.AreEqual(1, _game.Session.TeamSize(Team.Blue));
+            Assert.AreEqual(1, _game.Session.TeamSize(Team.Green));
+            Assert.IsFalse(_game.CanJoin(Team.Green), "ein Wechsel würde Grün größer machen");
+
+            yield return MeetInTheMiddle();
+            Assert.IsFalse(_game.Session.Zones.InSpawnZone(_game.Player.State.Position));
+            Assert.IsFalse(_game.Session.Zones.InSpawnZone(_other.Prediction.State.Position));
+
+            // Grün schaut zu Blau (Bild mit beiden Teamfarben), Blau schießt.
+            var me = _game.Player.State.Position;
+            var him = _other.Prediction.State.Position;
+            _otherInput = new PlayerInput { Weapon = 1, Yaw = Mathf.Repeat(Mathf.Atan2(me.X - him.X, me.Z - him.Z) * Mathf.Rad2Deg, 360) };
+            _game.Player.TestSelectSlot(1);
+            AimAtOther(16f / 16);
+            yield return Run(0.6f);
+            yield return Screenshot("m6-enemy");
+            _game.Player.TestFire(true);
+            var timeout = Time.realtimeSinceStartup + 5f;
+            while (!_game.Session.MatchOver && Time.realtimeSinceStartup < timeout)
+            {
+                AimAtOther(16f / 16);
+                UpdateOther();
+                yield return null;
+            }
+            _game.Player.TestFire(false);
+
+            // Punkt für Blau, Match vorbei: Beide sehen den Sieger.
+            Assert.IsTrue(_game.Session.MatchOver, "Match vorbei");
+            Assert.AreEqual(1, _game.Session.Match.ScoreBlue);
+            Assert.AreEqual(Team.Blue, _game.Session.Match.Winner);
+            Assert.AreEqual(1, _game.Session.Kills);
+            yield return Run(0.3f);
+            Assert.IsTrue(_other.MatchOver);
+            Assert.AreEqual(Team.Blue, _other.Match.Winner);
+            Assert.AreEqual(1, _other.Deaths);
+            Assert.AreEqual(1, _other.RemotePlayers[_game.Session.PlayerId].Kills);
+            yield return Screenshot("m6-match-end");
+
+            // Nach 3 s: nächstes Match.
+            timeout = Time.realtimeSinceStartup + 6f;
+            while (_game.Session.MatchOver && Time.realtimeSinceStartup < timeout) yield return Run(0.1f);
+            Assert.IsFalse(_game.Session.MatchOver, "neues Match");
+            yield return Run(0.5f);
+            Assert.AreEqual(0, _game.Session.Match.ScoreBlue);
+            Assert.AreEqual(2, _game.Session.Match.MatchNumber);
+            Assert.AreEqual(0, _game.Session.Kills);
+            Assert.IsTrue(_game.Session.Alive && _other.Alive, "alle wieder da");
+            Assert.IsTrue(_game.Session.Zones.SpawnZoneAt(_game.Player.State.Position) == Team.Blue, "Unity-Spieler im blauen Spawn");
+            Assert.IsTrue(_game.Session.Zones.SpawnZoneAt(_other.Prediction.State.Position) == Team.Green, "Gegner im grünen Spawn");
+            Assert.AreEqual(Team.Blue, _game.Session.Team, "Teams bleiben");
+        }
+
         /// <summary>Blick auf den anderen Spieler, so wie die Spielszene ihn gerade zeigt (Höhe über den Füßen in Blöcken).</summary>
         private void AimAtOther(float height)
         {
@@ -224,8 +312,53 @@ namespace AoS2.Client.Tests
             _game.Player.TestLook(Mathf.Repeat(Mathf.Atan2(dx, dz) * Mathf.Rad2Deg, 360), -Mathf.Atan2(dy, Mathf.Sqrt(dx * dx + dz * dz)) * Mathf.Rad2Deg);
         }
 
-        private void ConnectOtherClient()
+        /// <summary>Der zweite Client sprintet in Blickrichtung <paramref name="yaw"/>, bis die Bedingung gilt.</summary>
+        private IEnumerator WalkOther(float yaw, Func<bool> until, float seconds)
         {
+            _otherInput = new PlayerInput { Buttons = InputButtons.Forward | InputButtons.Sprint, Yaw = yaw };
+            var timeout = Time.realtimeSinceStartup + seconds;
+            while (!until() && Time.realtimeSinceStartup < timeout) yield return Run(0.05f);
+            _otherInput = default;
+            yield return Run(0.4f);
+        }
+
+        /// <summary>
+        /// Blau (Unity) läuft aus dem Spawn im Süden nach +z, Grün (zweiter Client) aus dem Spawn im Norden nach −z, beide bei
+        /// x = 53,5 (erster Spawnpunkt jedes Teams), bis sie sich auf 14 Blöcke nah sind. Beide stehen dann in der Kampfzone.
+        /// </summary>
+        private IEnumerator MeetInTheMiddle()
+        {
+            Func<bool> close = () => Distance(_game.Player.State.Position, _other.Prediction.State.Position) < 14;
+            _game.Player.TestLook(0, 0);
+            _game.Player.TestButtons = InputButtons.Forward | InputButtons.Sprint;
+            yield return WalkOther(180, close, 20);
+            _game.Player.TestButtons = null;
+            yield return Run(0.5f);
+            Assert.IsTrue(close(), $"nah genug: {_game.Player.State.Position} / {_other.Prediction.State.Position}");
+            var combat = _game.Metadata.CombatZone.Value;
+            foreach (var p in new[] { _game.Player.State.Position, _other.Prediction.State.Position })
+                Assert.IsTrue(combat.Contains(Mathf.FloorToInt(p.X), Mathf.FloorToInt(p.Y), Mathf.FloorToInt(p.Z)), $"{p} in der Kampfzone");
+        }
+
+        /// <summary>Wartet, bis der zweite Client im Team ist, gespawnt hat und von der Spielszene gezeigt wird.</summary>
+        private IEnumerator WaitForOther()
+        {
+            var timeout = Time.realtimeSinceStartup + 10f;
+            while ((_other.Team != _otherTeam || !_other.Alive || _game.RemotePlayers.Count == 0) && Time.realtimeSinceStartup < timeout)
+            {
+                UpdateOther();
+                yield return null;
+            }
+            Assert.AreEqual(ClientPhase.Playing, _other.Phase, _other.Error);
+            Assert.AreEqual(_otherTeam, _other.Team);
+            Assert.IsTrue(_other.Alive, "zweiter Client gespawnt");
+            yield return Run(0.3f);
+        }
+
+        private void ConnectOtherClient(Team team)
+        {
+            _otherTeam = team;
+            _otherTeamRequested = false;
             _otherInput = default;
             var registry = _game.Registry;
             _otherNet = new NetClient();
@@ -242,6 +375,11 @@ namespace AoS2.Client.Tests
         {
             _otherNet.Poll();
             _other.Update();
+            if (_other.Phase == ClientPhase.Playing && !_otherTeamRequested)
+            {
+                _other.RequestTeam(_otherTeam);
+                _otherTeamRequested = true;
+            }
             while (Time.realtimeSinceStartupAsDouble >= _otherNextTick)
             {
                 _otherNextTick += 1.0 / 60;

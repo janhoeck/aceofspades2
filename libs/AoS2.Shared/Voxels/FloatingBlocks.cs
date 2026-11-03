@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace AoS2.Shared.Voxels
@@ -39,12 +40,13 @@ namespace AoS2.Shared.Voxels
         /// Gruppen, die nach einer Änderung an (x, y, z) frei schweben (Block dort ist schon entfernt).
         /// Die Blöcke bleiben in der Welt; entfernen erledigt <see cref="FallingBlocks"/>.
         /// </summary>
-        public static List<List<GroupBlock>> FindDetached(VoxelWorld world, int x, int y, int z, int maxGroupSize = DefaultMaxGroupSize)
+        public static List<List<GroupBlock>> FindDetached(VoxelWorld world, int x, int y, int z, int maxGroupSize = DefaultMaxGroupSize,
+            Func<int, int, int, bool> isAnchor = null)
         {
             var result = new List<List<GroupBlock>>();
             // Blöcke, deren Verbleib schon geklärt ist (verankert oder schon Teil einer gefundenen Gruppe).
             var settled = new HashSet<long>();
-            CheckNeighbours(world, x, y, z, maxGroupSize, settled, result);
+            CheckNeighbours(world, x, y, z, maxGroupSize, isAnchor, settled, result);
             return result;
         }
 
@@ -52,15 +54,16 @@ namespace AoS2.Shared.Voxels
         /// Wie <see cref="FindDetached(VoxelWorld, int, int, int, int)"/> für viele entfernte Blöcke auf einmal (Explosion):
         /// Jeder Nachbarblock wird nur einmal untersucht, auch wenn er an mehrere entfernte Blöcke grenzt.
         /// </summary>
-        public static List<List<GroupBlock>> FindDetached(VoxelWorld world, IReadOnlyList<BlockPos> removed, int maxGroupSize = DefaultMaxGroupSize)
+        public static List<List<GroupBlock>> FindDetached(VoxelWorld world, IReadOnlyList<BlockPos> removed, int maxGroupSize = DefaultMaxGroupSize,
+            Func<int, int, int, bool> isAnchor = null)
         {
             var result = new List<List<GroupBlock>>();
             var settled = new HashSet<long>();
-            foreach (var p in removed) CheckNeighbours(world, p.X, p.Y, p.Z, maxGroupSize, settled, result);
+            foreach (var p in removed) CheckNeighbours(world, p.X, p.Y, p.Z, maxGroupSize, isAnchor, settled, result);
             return result;
         }
 
-        private static void CheckNeighbours(VoxelWorld world, int x, int y, int z, int maxGroupSize, HashSet<long> settled, List<List<GroupBlock>> result)
+        private static void CheckNeighbours(VoxelWorld world, int x, int y, int z, int maxGroupSize, Func<int, int, int, bool> isAnchor, HashSet<long> settled, List<List<GroupBlock>> result)
         {
             for (var f = 0; f < BlockFaces.Count; f++)
             {
@@ -68,7 +71,7 @@ namespace AoS2.Shared.Voxels
                 if (!world.IsSolid(nx, ny, nz) || settled.Contains(Key(nx, ny, nz))) continue;
 
                 var visited = new HashSet<long>();
-                var group = Flood(world, nx, ny, nz, maxGroupSize, visited);
+                var group = Flood(world, nx, ny, nz, maxGroupSize, isAnchor, visited);
                 settled.UnionWith(visited);
                 if (group != null) result.Add(group);
             }
@@ -76,10 +79,10 @@ namespace AoS2.Shared.Voxels
 
         /// <summary>Hängt der Block (x, y, z) mit dem Boden zusammen? (Luft gilt als nicht verbunden.)</summary>
         public static bool IsAnchored(VoxelWorld world, int x, int y, int z, int maxGroupSize = DefaultMaxGroupSize) =>
-            world.IsSolid(x, y, z) && Flood(world, x, y, z, maxGroupSize, new HashSet<long>()) == null;
+            world.IsSolid(x, y, z) && Flood(world, x, y, z, maxGroupSize, null, new HashSet<long>()) == null;
 
         /// <summary>Liefert die schwebende Gruppe ab einem Startblock oder <c>null</c>, wenn sie verankert ist.</summary>
-        private static List<GroupBlock> Flood(VoxelWorld world, int sx, int sy, int sz, int maxGroupSize, HashSet<long> visited)
+        private static List<GroupBlock> Flood(VoxelWorld world, int sx, int sy, int sz, int maxGroupSize, Func<int, int, int, bool> isAnchor, HashSet<long> visited)
         {
             var stack = new Stack<long>();
             var group = new List<GroupBlock>();
@@ -89,7 +92,7 @@ namespace AoS2.Shared.Voxels
             while (stack.Count > 0)
             {
                 Unpack(stack.Pop(), out var x, out var y, out var z);
-                if (y == 0) return null; // Boden erreicht
+                if (y == 0 || (isAnchor != null && isAnchor(x, y, z))) return null; // Boden (oder ein unveränderlicher Block) erreicht
                 group.Add(new GroupBlock(x, y, z, world.GetBlock(x, y, z)));
                 if (group.Count > maxGroupSize) return null; // zu groß: gilt als verankert
 

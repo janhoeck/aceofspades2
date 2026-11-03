@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using AoS2.Shared.Combat;
+using AoS2.Shared.Maps;
 using AoS2.Shared.Voxels;
 
 namespace AoS2.Shared.Net.Client
@@ -40,15 +41,17 @@ namespace AoS2.Shared.Net.Client
 
         private readonly VoxelWorld _world;
         private readonly CombatSettings _combat;
+        private readonly MapZones _zones;
         private readonly float _dt;
         private readonly Dictionary<int, NetProjectile> _all = new Dictionary<int, NetProjectile>();
         private readonly List<int> _remove = new List<int>();
 
-        public NetProjectiles(VoxelWorld world, CombatSettings combat, float dt)
+        public NetProjectiles(VoxelWorld world, CombatSettings combat, float dt, MapZones zones = null)
         {
             _world = world;
             _combat = combat;
             _dt = dt;
+            _zones = zones;
         }
 
         public IReadOnlyDictionary<int, NetProjectile> All => _all;
@@ -67,6 +70,9 @@ namespace AoS2.Shared.Net.Client
 
         public void Explode(int id) => _all.Remove(id);
 
+        /// <summary>Alle Geschosse verwerfen (Neustart eines Matches).</summary>
+        public void Clear() => _all.Clear();
+
         /// <summary>Rechnet alle Geschosse bis zum Server-Tick <paramref name="serverTick"/> und setzt die Anzeigeposition.</summary>
         public void UpdateRender(double serverTick)
         {
@@ -84,7 +90,7 @@ namespace AoS2.Shared.Net.Client
                         if (++p.StoppedTicks > MaxStoppedTicks) _remove.Add(p.Id);
                         continue;
                     }
-                    if (ProjectileSim.Step(ref p.Sim, weapon, _world, _dt)) p.Stopped = true;
+                    if (ProjectileSim.Step(ref p.Sim, weapon, _world, _dt, _zones)) p.Stopped = true;
                 }
                 var t = (float)(serverTick - p.SimTick); // einen Tick zurück, dafür flüssig zwischen zwei gerechneten Ticks
                 p.Position = p.Stopped ? p.Sim.Position : Vec3.Lerp(p.Previous, p.Sim.Position, t < 0 ? 0 : t > 1 ? 1 : t);

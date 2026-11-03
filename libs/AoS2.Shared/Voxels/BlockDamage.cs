@@ -37,6 +37,9 @@ namespace AoS2.Shared.Voxels
 
         public int Count => _damage.Count;
 
+        /// <summary>Allen Schaden vergessen (Neustart eines Matches).</summary>
+        public void Clear() => _damage.Clear();
+
         public float Get(int x, int y, int z) => _damage.TryGetValue(Key(x, y, z), out var d) ? d : 0;
 
         /// <summary>

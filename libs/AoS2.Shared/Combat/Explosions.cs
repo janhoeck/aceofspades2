@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AoS2.Shared.Maps;
 using AoS2.Shared.Voxels;
 
 namespace AoS2.Shared.Combat
@@ -13,9 +14,10 @@ namespace AoS2.Shared.Combat
         /// Beschädigt alle Blöcke, deren Mitte im Radius liegt. Zerstörte Blöcke kommen in <paramref name="destroyed"/>
         /// (sie stehen noch in der Welt, entfernen muss der Aufrufer), beschädigte in <paramref name="damaged"/>.
         /// Die Reihenfolge ist fest (y, z, x), damit Client und Server, Test und Spiel dasselbe Ergebnis sehen.
+        /// Blöcke, die die Zonen schützen (<see cref="MapZones.CanEditBlock"/>), bleiben unbeschädigt.
         /// </summary>
         public static void DamageBlocks(VoxelWorld world, BlockDamage damage, Vec3 center, float radius, float maxDamage,
-            List<BlockPos> destroyed, List<BlockPos> damaged)
+            List<BlockPos> destroyed, List<BlockPos> damaged, MapZones zones = null)
         {
             if (radius <= 0 || maxDamage <= 0) return;
             int x0 = DetMath.FloorToInt(center.X - radius), x1 = DetMath.FloorToInt(center.X + radius);
@@ -25,7 +27,7 @@ namespace AoS2.Shared.Combat
                 for (var z = z0; z <= z1; z++)
                     for (var x = x0; x <= x1; x++)
                     {
-                        if (!world.IsSolid(x, y, z)) continue;
+                        if (!world.IsSolid(x, y, z) || (zones != null && !zones.CanEditBlock(x, y, z))) continue;
                         var d = Vec3.Distance(center, new Vec3(x + 0.5f, y + 0.5f, z + 0.5f));
                         if (d >= radius) continue;
                         var amount = maxDamage * (1 - d / radius);

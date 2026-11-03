@@ -56,6 +56,18 @@ namespace AoS2.Shared.Net.Client
             Landed?.Invoke(group, offset);
         }
 
+        /// <summary>
+        /// Alle Gruppen verwerfen (Neustart eines Matches). Die Welt setzt der Server mit eigenen Blockänderungen zurück; die
+        /// Anzeige erfährt es wie bei einer Landung (ohne dass hier Blöcke gesetzt werden).
+        /// </summary>
+        public void Clear()
+        {
+            var groups = _groups.ToArray();
+            _groups.Clear();
+            _samples.Clear();
+            foreach (var g in groups) Landed?.Invoke(g, 0);
+        }
+
         public void OnSnapshot(uint serverTick, List<FallingSnapshot> falling)
         {
             foreach (var f in falling)

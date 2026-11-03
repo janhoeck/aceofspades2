@@ -75,6 +75,9 @@ namespace AoS2.Client.Player
         /// <summary>Block unter dem Fadenkreuz (in Reichweite), sonst <c>null</c>.</summary>
         public VoxelHit? Target { get; private set; }
 
+        /// <summary>Tab gedrückt: Punktetabelle zeigen.</summary>
+        public bool ScoreboardHeld { get; private set; }
+
         /// <summary>Für Tests: ersetzt die Tasten (Maus und Tastatur werden dann nicht gelesen).</summary>
         public InputButtons? TestButtons { get; set; }
 
@@ -137,6 +140,29 @@ namespace AoS2.Client.Player
             var mouse = Mouse.current;
             var keyboard = Keyboard.current;
             if (mouse == null || keyboard == null) return;
+
+            ScoreboardHeld = keyboard.tabKey.isPressed;
+
+            // Team-Menü (online): M öffnet und schließt es; solange es offen ist, gehört die Maus dem Menü.
+            if (_game.Mode == GameMode.Online)
+            {
+                if (_game.TeamMenuOpen)
+                {
+                    _fireHeld = false;
+                    if (keyboard.mKey.wasPressedThisFrame || keyboard.escapeKey.wasPressedThisFrame)
+                    {
+                        _game.CloseTeamMenu();
+                        if (!_game.TeamMenuOpen && keyboard.escapeKey.wasPressedThisFrame) return; // Esc schließt nur das Menü
+                    }
+                    if (_game.TeamMenuOpen) return;
+                    _waitForRelease = true;
+                }
+                else if (keyboard.mKey.wasPressedThisFrame)
+                {
+                    _game.OpenTeamMenu();
+                    return;
+                }
+            }
 
             if (keyboard.escapeKey.wasPressedThisFrame)
             {
@@ -287,7 +313,14 @@ namespace AoS2.Client.Player
             if (weapon.Kind != WeaponKind.Hitscan) return;
             var eye = _state.Eye(_game.Movement);
             var end = eye + dir * weapon.Range;
-            if (VoxelRaycast.Cast(_game.World, eye, dir, weapon.Range, out var hit))
+            var blockHit = VoxelRaycast.Cast(_game.World, eye, dir, weapon.Range, out var hit);
+            var zones = _game.Session.Zones;
+            if (zones != null && zones.Raycast(eye, dir, blockHit ? hit.Distance : weapon.Range, out var wall, out _, out _, out _))
+            {
+                end = eye + dir * wall; // der Schuss endet an der Grenze einer Spawnzone, wie auf dem Server
+                blockHit = false;
+            }
+            if (blockHit)
             {
                 end = eye + dir * hit.Distance;
                 effects.BlockImpact(ToUnity(end), new Vector3(hit.NormalX, hit.NormalY, hit.NormalZ), _game.World.GetBlock(hit.X, hit.Y, hit.Z));

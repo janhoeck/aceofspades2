@@ -1,0 +1,49 @@
+// Ace of Spades 2 – Server-Config (Vorlage)
+//
+// Kopieren nach server.json, anpassen und den Server so starten:
+//   AoS2.Server --config server.json
+// Alle Einträge sind optional; was fehlt, hat den Standardwert. Werte auf der Kommandozeile gelten vor der Datei.
+// Kommentare mit // sind erlaubt, unbekannte Einträge ein Fehler (gegen Tippfehler).
+{
+  // Name des Servers (Anzeige; ab M7 im Server-Browser)
+  "name": "Ace of Spades 2",
+
+  // UDP-Port. Für Spieler aus dem Internet muss er im Router weitergeleitet und in der Firewall freigegeben sein.
+  "port": 32887,
+
+  // Map aus dem maps-Ordner, ohne .aos2map
+  "map": "testmap",
+
+  // ---- Team Deathmatch ----
+
+  // Spieler pro Team (1 bis 24). Der Server nimmt doppelt so viele auf.
+  "playersPerTeam": 16,
+
+  // Wer zuerst so viele Punkte hat, gewinnt. Ein Kill eines Gegners = 1 Punkt.
+  "scoreLimit": 50,
+
+  // Zeitlimit in Minuten, 0 = keins. Bei Ablauf gewinnt das führende Team, bei Gleichstand niemand.
+  "timeLimitMinutes": 0,
+
+  // So viele Sekunden steht das Ergebnis, dann beginnt das nächste Match (Map wird zurückgesetzt, Teams bleiben).
+  "matchEndSeconds": 15,
+
+  // Teambeschuss: Können Mitspieler sich gegenseitig verletzen? Eigene Explosionen schaden immer.
+  "friendlyFire": false,
+
+  // ---- Anmeldung (Join-Tickets) ----
+
+  // Adresse der Website. Von dort holt der Server die öffentlichen Schlüssel, mit denen er Join-Tickets prüft.
+  "site": "https://aos2.example.org",
+
+  // Adresse dieses Servers, genau so, wie Spieler sie im Spiel eingeben (steht im Join-Ticket).
+  "address": "play.example.org:32887",
+
+  // Entwicklungsmodus: nimmt auch selbst ausgestellte Entwicklungs-Tickets an, die JEDER fälschen kann.
+  // Nur zum lokalen Testen, nie für einen Server, der aus dem Internet erreichbar ist.
+  "dev": false
+
+  // Optional: andere Ordner für Spieldaten und Maps (relativ zu dieser Datei)
+  // "data": "data",
+  // "maps": "maps"
+}

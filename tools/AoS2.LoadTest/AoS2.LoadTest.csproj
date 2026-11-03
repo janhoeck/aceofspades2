@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Lasttest: viele simulierte Spieler (Bots) über echtes UDP gegen einen Server im selben Prozess oder einen laufenden Server. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>AoS2.LoadTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\server\AoS2.Server\AoS2.Server.csproj" />
+    <ProjectReference Include="..\..\libs\AoS2.Net\AoS2.Net.csproj" />
+  </ItemGroup>
+
+</Project>

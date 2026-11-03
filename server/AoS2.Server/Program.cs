@@ -1,6 +1,9 @@
 using AoS2.Server;
 using AoS2.Shared;
+using AoS2.Shared.Maps;
 using Microsoft.Extensions.Logging;
+
+Console.OutputEncoding = System.Text.Encoding.UTF8; // Umlaute auch in der klassischen Windows-Konsole
 
 using var loggers = LoggerFactory.Create(builder => builder
     .AddSimpleConsole(o =>
@@ -52,17 +55,28 @@ try
     using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
     tickets = await TicketCheck.CreateAsync(options, http, TimeProvider.System, stop.Token);
 }
-catch (Exception e) when (e is IOException or FormatException or InvalidDataException or HttpRequestException or TaskCanceledException or UnauthorizedAccessException)
+catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+{
+    log.LogError("Start fehlgeschlagen: Die Website {Site} ist nicht erreichbar, der Server braucht von dort die Schlüssel für Join-Tickets ({Message}). Stimmt \"site\"? Zum Testen ohne Backend: --dev und kein site.",
+        options.SiteUrl, e.Message);
+    return 1;
+}
+catch (Exception e) when (e is IOException or FormatException or InvalidDataException or UnauthorizedAccessException)
 {
     log.LogError("Start fehlgeschlagen: {Message}", e.Message);
     return 1;
 }
 
-using var server = new GameServer(content, options.MaxPlayers, tickets, log);
+using var server = new GameServer(content, options.Match, tickets, log);
 var world = server.Match.World;
-log.LogInformation("Ace of Spades 2 Server, Protokoll {Protocol}, Map {Map} ({X} × {Y} × {Z}), höchstens {Max} Spieler{Tickets}",
-    ProtocolInfo.Version, content.MapName, world.SizeX, world.SizeY, world.SizeZ, options.MaxPlayers,
+log.LogInformation("\"{Name}\": Ace of Spades 2 Server, Protokoll {Protocol}, Map {Map} ({X} × {Y} × {Z}){Config}{Tickets}",
+    options.Name, ProtocolInfo.Version, content.MapName, world.SizeX, world.SizeY, world.SizeZ,
+    options.ConfigFile != null ? $", Config {options.ConfigFile}" : "",
     options.SiteUrl != null ? $", Join-Tickets von {options.SiteUrl} für {options.Address}" : "");
+var rules = options.Match;
+log.LogInformation("Team Deathmatch: {Blue} gegen {Green}, bis {Score} Punkte{Time}, Teambeschuss {FriendlyFire}, {End} s Pause nach dem Matchende",
+    rules.PlayersPerTeam, rules.PlayersPerTeam, rules.ScoreLimit, rules.TimeLimitMinutes > 0 ? $" oder {rules.TimeLimitMinutes} min" : "",
+    rules.FriendlyFire ? "an" : "aus", rules.MatchEndSeconds);
 try
 {
     server.Start(options.Port);
@@ -73,7 +87,18 @@ catch (InvalidOperationException e)
     return 1;
 }
 
-ServerLoop.Run(server, stop.Token);
+// Jede Minute eine Zeile zum Zustand: Spieler, Punkte, wie lange ein Tick rechnet und wie viel der Server verschickt.
+const double reportSeconds = 60;
+ServerLoop.Run(server, stop.Token, () =>
+{
+    var s = server.Stats;
+    var m = server.Match;
+    if (m.Players.Count > 0)
+        log.LogInformation("Status: {Players} Spieler (Blau {Blue}, Grün {Green}), Punkte {ScoreBlue} : {ScoreGreen}, Tick Ø {Avg:0.00} ms / max {Max:0.0} ms{Slow}, senden {Rate:0} kB/s",
+            m.Players.Count, m.TeamSize(Team.Blue), m.TeamSize(Team.Green), m.Info.ScoreBlue, m.Info.ScoreGreen, s.AverageStepMs, s.MaxStepMs,
+            s.SlowTicks > 0 ? $" ({s.SlowTicks} Ticks zu langsam)" : "", s.SentBytes / 1024.0 / reportSeconds);
+    s.Reset();
+}, reportSeconds);
 log.LogInformation("Server wird beendet …");
 server.Stop();
 return 0;

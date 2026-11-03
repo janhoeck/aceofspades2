@@ -62,6 +62,9 @@ namespace AoS2.Shared.Voxels
         public float Gravity { get; }
         public float MaxSpeed { get; }
 
+        /// <summary>Blöcke, die wie der Boden verankern (unveränderliche Blöcke, <see cref="Maps.MapZones.IsAnchor"/>); <c>null</c> = nur der Boden.</summary>
+        public Func<int, int, int, bool> Anchor { get; set; }
+
         /// <summary>Gruppen, die gerade fallen.</summary>
         public IReadOnlyList<FallingGroup> Groups => _groups;
 
@@ -77,7 +80,7 @@ namespace AoS2.Shared.Voxels
         /// </summary>
         public int CheckAfterRemoval(int x, int y, int z, int maxGroupSize = FloatingBlocks.DefaultMaxGroupSize)
         {
-            var groups = FloatingBlocks.FindDetached(_world, x, y, z, maxGroupSize);
+            var groups = FloatingBlocks.FindDetached(_world, x, y, z, maxGroupSize, Anchor);
             foreach (var blocks in groups) StartFalling(blocks);
             return groups.Count;
         }
@@ -85,7 +88,7 @@ namespace AoS2.Shared.Voxels
         /// <summary>Wie <see cref="CheckAfterRemoval"/> für viele entfernte Blöcke auf einmal (z. B. nach einer Explosion).</summary>
         public int CheckAfterRemovals(IReadOnlyList<BlockPos> removed, int maxGroupSize = FloatingBlocks.DefaultMaxGroupSize)
         {
-            var groups = FloatingBlocks.FindDetached(_world, removed, maxGroupSize);
+            var groups = FloatingBlocks.FindDetached(_world, removed, maxGroupSize, Anchor);
             foreach (var blocks in groups) StartFalling(blocks);
             return groups.Count;
         }
@@ -99,6 +102,9 @@ namespace AoS2.Shared.Voxels
             Started?.Invoke(group);
             return group;
         }
+
+        /// <summary>Alle fallenden Gruppen verwerfen, ohne sie zu landen (Neustart eines Matches: die Welt wird ohnehin zurückgesetzt).</summary>
+        public void Clear() => _groups.Clear();
 
         public void Tick(float dt)
         {

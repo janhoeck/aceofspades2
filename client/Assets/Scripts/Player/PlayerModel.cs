@@ -90,6 +90,12 @@ namespace AoS2.Client.Player
                 if (bone != null && bone.TryGetComponent<MeshFilter>(out var filter)) Destroy(filter.sharedMesh);
         }
 
+        /// <summary>Material aller Körperteile wechseln (Teamfarbe).</summary>
+        public void SetMaterial(Material material)
+        {
+            foreach (var r in _renderers) r.sharedMaterial = material;
+        }
+
         /// <summary>Lässt das Modell kurz aufleuchten (Treffer).</summary>
         public void Flash(float amount)
         {

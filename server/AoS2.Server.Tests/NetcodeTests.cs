@@ -30,7 +30,7 @@ public class NetcodeTests
         var net = new SimulatedNetwork();
         var a = net.Join("Anna");
 
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing, 1));
+        Assert.True(net.RunUntil(() => a.Ready, 1));
         Assert.Equal(TestArena.MapName, a.Session.MapName);
         Assert.Equal("Anna", a.Session.PlayerName);
         Assert.Equal(TestArena.SpawnA, a.State.Position);
@@ -66,7 +66,7 @@ public class NetcodeTests
     {
         var net = new SimulatedNetwork(seed: 42) { OneWayLatency = 0.06, Jitter = 0.03, Loss = 0.2 };
         var a = net.Join("Anna");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready));
 
         // Drei Sekunden Zickzack mit Springen, Sprinten und Ducken
         var frame = 0;
@@ -95,7 +95,7 @@ public class NetcodeTests
     {
         var net = new SimulatedNetwork { OneWayLatency = 0.1 };
         var a = net.Join("Anna");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready));
         a.Input.Buttons = InputButtons.Forward;
         net.Run(0.1);
 
@@ -110,7 +110,7 @@ public class NetcodeTests
         var net = new SimulatedNetwork { OneWayLatency = 0.05 };
         var a = net.Join("Anna");
         var b = net.Join("Ben");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing && b.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready && b.Ready));
 
         // Ben schaut auf den Boden vor Anna: Block (16, 3, 19)
         b.LookAt(new Vec3(16.5f, 4f, 19.5f));
@@ -145,7 +145,7 @@ public class NetcodeTests
         var net = new SimulatedNetwork(seed: 3) { OneWayLatency = 0.04, Jitter = 0.02, Loss = 0.1 };
         var a = net.Join("Anna");
         var b = net.Join("Ben");
-        Assert.True(net.RunUntil(() => b.Session.Phase == ClientPhase.Playing && b.Session.RemotePlayers.Count == 1));
+        Assert.True(net.RunUntil(() => a.Ready && b.Ready && b.Session.RemotePlayers.Count == 1));
         net.Run(0.5);
 
         a.Input.Buttons = InputButtons.Forward;
@@ -171,7 +171,7 @@ public class NetcodeTests
         var net = new SimulatedNetwork { OneWayLatency = 0.05 };
         var a = net.Join("Anna");
         var b = net.Join("Ben");
-        Assert.True(net.RunUntil(() => b.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready && b.Ready));
 
         a.LookAt(new Vec3(16.5f, 4f, 19.5f));
         a.AfterNextTick(c => c.PlaceAtTarget(TestArena.Build));
@@ -191,19 +191,21 @@ public class NetcodeTests
     {
         var net = new SimulatedNetwork();
         var a = net.Join("Anna");
-        var b = net.Join("Ben"); // steht bei (19,5 | 4 | 16,5)
-        Assert.True(net.RunUntil(() => b.Session.Phase == ClientPhase.Playing));
+        var b = net.Join("Ben");
+        Assert.True(net.RunUntil(() => a.Ready && b.Ready));
+        net.Teleport(b, new Vec3(18.5f, 4, 18.5f)); // neben die Spawnzonen, dort darf gebaut werden
+        net.Run(0.3);
 
-        a.LookAt(new Vec3(19.5f, 4f, 16.5f));
+        a.LookAt(new Vec3(18.5f, 4f, 18.5f));
         a.AfterNextTick(c => c.PlaceAtTarget(TestArena.Build));
         net.Frame();
         Assert.Equal([BlockEditResult.Ok], a.LocalResults); // der Client sieht kein Hindernis …
-        Assert.Equal(TestArena.Build, a.Session.World.GetBlock(19, 4, 16));
+        Assert.Equal(TestArena.Build, a.Session.World.GetBlock(18, 4, 18));
 
         net.Run(0.3);
         Assert.Equal([BlockEditResult.BlockedByPlayer], a.Rejected); // … aber der Server
-        Assert.False(a.Session.World.IsSolid(19, 4, 16));
-        Assert.False(net.Match.World.IsSolid(19, 4, 16));
+        Assert.False(a.Session.World.IsSolid(18, 4, 18));
+        Assert.False(net.Match.World.IsSolid(18, 4, 18));
     }
 
     [Fact]
@@ -211,7 +213,7 @@ public class NetcodeTests
     {
         var net = new SimulatedNetwork();
         var a = net.Join("Anna");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready));
 
         // Ein manipulierter Client baut zwei Blöcke im selben Tick ab.
         a.AfterNextTick(c => c.Session.RequestRemove(16, 3, 18, 2));
@@ -229,7 +231,7 @@ public class NetcodeTests
     {
         var net = new SimulatedNetwork();
         var a = net.Join("Anna");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready));
 
         a.LookAt(new Vec3(16.5f, 4f, 19.5f));
         a.AfterNextTick(c => c.Session.RequestRemove(17, 3, 15, 1.5f)); // ein anderer Block in Reichweite
@@ -244,7 +246,7 @@ public class NetcodeTests
     {
         var net = new SimulatedNetwork();
         var a = net.Join("Anna");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready));
 
         // Anna schaut auf den Boden; der Block darunter ist verdeckt.
         a.LookAt(new Vec3(16.5f, 4f, 18.5f));
@@ -261,7 +263,7 @@ public class NetcodeTests
         var net = new SimulatedNetwork(seed: 5) { OneWayLatency = 0.05, Jitter = 0.02, Loss = 0.1 };
         var a = net.Join("Anna");
         var b = net.Join("Ben");
-        Assert.True(net.RunUntil(() => b.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready && b.Ready));
 
         // Anna baut den Verbindungsblock (13, 7, 16) von der Seite ab; der Balken (8…12, 7, 16) fällt.
         a.LookAt(new Vec3(14f, 7.5f, 16.5f));
@@ -300,7 +302,7 @@ public class NetcodeTests
     {
         var net = new SimulatedNetwork { OneWayLatency = 0.05 };
         var a = net.Join("Anna");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready));
 
         a.LookAt(new Vec3(16.5f, 4f, 19.5f));
         a.AfterNextTick(c => c.PlaceAtTarget(TestArena.Build));
@@ -311,7 +313,7 @@ public class NetcodeTests
         net.Run(0.1); // die Gruppe fällt schon ein Stück
 
         var c = net.Join("Chris");
-        Assert.True(net.RunUntil(() => c.Session.Phase == ClientPhase.Playing, 1));
+        Assert.True(net.RunUntil(() => c.Ready, 1));
         Assert.Equal(TestArena.Build, c.Session.World.GetBlock(16, 4, 19));
         Assert.False(c.Session.World.IsSolid(13, 7, 16));
         Assert.Single(c.Session.RemotePlayers);
@@ -338,7 +340,7 @@ public class NetcodeTests
     {
         var net = new SimulatedNetwork();
         var a = net.Join("Anna");
-        Assert.True(net.RunUntil(() => a.Session.Phase == ClientPhase.Playing));
+        Assert.True(net.RunUntil(() => a.Ready));
         var startTick = net.Match.Tick;
         a.TicksPerFrame = 2;
         a.Input.Buttons = InputButtons.Forward;
@@ -369,7 +371,7 @@ public class NetcodeTests
     {
         var sizes = new List<int>();
         var output = new RecordingOutput(sizes);
-        var match = new Match(TestArena.Content, output, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        var match = new Match(TestArena.Content, output, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, new MatchSettings { PlayersPerTeam = ServerOptions.MaxPlayersPerTeam });
         for (var i = 0; i < ServerOptions.MaxPlayersLimit; i++) match.AddPlayer(Guid.NewGuid(), "Spieler" + i);
         // Viele kleine schwebende Gruppen: Säulen ohne Boden
         for (var x = 0; x < 60; x += 2)
