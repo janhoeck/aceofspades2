@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Dedizierter Spielserver: autoritative Simulation mit 60 Ticks/s, Verbindung über LiteNetLib (UDP). -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>AoS2.Server</RootNamespace>
+    <AssemblyName>AoS2.Server</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LiteNetLib" Version="2.1.4" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\libs\AoS2.Shared\AoS2.Shared.csproj" />
+    <ProjectReference Include="..\..\libs\AoS2.JoinTickets\AoS2.JoinTickets.csproj" />
+    <ProjectReference Include="..\..\libs\AoS2.Contracts\AoS2.Contracts.csproj" />
+  </ItemGroup>
+
+  <!-- Spieldaten und Maps neben die exe kopieren, damit der Server sie ohne Pfadangabe findet. -->
+  <ItemGroup>
+    <None Include="..\..\data\*.json" Link="data\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\maps\*.aos2map" Link="maps\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AoS2.Server.Tests" />
+  </ItemGroup>
+
+</Project>

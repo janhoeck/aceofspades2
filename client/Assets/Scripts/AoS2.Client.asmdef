@@ -4,6 +4,8 @@
     "references": [
         "AoS2.Shared",
         "AoS2.Contracts",
+        "AoS2.Net",
+        "LiteNetLib",
         "Unity.InputSystem",
         "Unity.Burst",
         "Unity.Collections",

@@ -8,11 +8,11 @@ namespace AoS2.Client.World
 {
     /// <summary>
     /// Zeigt fallende Blockgruppen als eigene Meshes. Die Simulation (wann, wie weit, wo sie landen)
-    /// läuft in <see cref="FallingBlocks"/> aus AoS2.Shared; hier wird nur gezeichnet.
+    /// läuft offline in <see cref="FallingBlocks"/> aus AoS2.Shared und online auf dem Server; hier wird nur gezeichnet.
     /// </summary>
     public sealed class FallingBlocksView : MonoBehaviour
     {
-        private FallingBlocks _falling;
+        private IFallingGroups _falling;
         private VoxelMeshBuilder _builder;
         private Material _material;
         private readonly Dictionary<int, View> _views = new Dictionary<int, View>();
@@ -27,17 +27,19 @@ namespace AoS2.Client.World
 
         public int ActiveCount => _views.Count;
 
-        public void Initialize(FallingBlocks falling, VoxelMeshBuilder builder, Material material)
+        public void Initialize(IFallingGroups falling, VoxelMeshBuilder builder, Material material)
         {
             _falling = falling;
             _builder = builder;
             _material = material;
             falling.Started += OnStarted;
             falling.Landed += OnLanded;
+            foreach (var g in falling.Groups) OnStarted(g); // beim Beitritt können schon Gruppen fallen
         }
 
         private void OnDestroy()
         {
+            foreach (var view in _views.Values) Destroy(view.Mesh);
             if (_falling == null) return;
             _falling.Started -= OnStarted;
             _falling.Landed -= OnLanded;

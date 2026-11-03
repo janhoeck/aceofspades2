@@ -12,9 +12,10 @@ namespace AoS2.Client.Player
     /// Der eigene Spieler: liest Maus und Tastatur, rechnet die Bewegung mit dem gemeinsamen Code
     /// (<see cref="PlayerMovement"/>) und setzt die Kamera. Abbauen (Linksklick) und Bauen (Rechtsklick)
     /// laufen ebenfalls im Tick, mit kurzer Pause zwischen zwei Aktionen.
+    /// Online rechnet die <see cref="AoS2.Shared.Net.Client.ClientSession"/> den Tick (Vorhersage) und schickt die Eingabe an den Server.
     ///
     /// Steuerung: WASD laufen, Maus schauen, Leertaste springen, Strg ducken, Shift sprinten,
-    /// Linksklick abbauen, Rechtsklick bauen, 1–9 / Mausrad Blocktyp, Esc gibt die Maus frei (zweimal: beenden).
+    /// Linksklick abbauen, Rechtsklick bauen, 1–9 / Mausrad Blocktyp, Esc gibt die Maus frei (zweimal: zurück ins Startmenü).
     /// </summary>
     public sealed class LocalPlayer : MonoBehaviour
     {
@@ -22,7 +23,15 @@ namespace AoS2.Client.Player
         private const float CrouchSmoothing = 10f;
         private const float StepSmoothing = 14f;
 
-        private LocalGame _game;
+        /// <summary>Wie schnell eine Korrektur durch den Server ausgeglichen wird (größer = schneller).</summary>
+        private const float CorrectionSmoothing = 12f;
+
+        /// <summary>Größere Korrekturen (in Blöcken) werden nicht geglättet, sondern sofort übernommen.</summary>
+        private const float MaxSmoothedCorrection = 2f;
+
+        private Vector3 _correctionOffset;
+
+        private GameClient _game;
         private Camera _camera;
         private BlockHighlight _highlight;
         private PlayerState _state;
@@ -49,11 +58,25 @@ namespace AoS2.Client.Player
         /// <summary>Für Tests: ersetzt die Tasten (Maus und Tastatur werden dann nicht gelesen).</summary>
         public InputButtons? TestButtons { get; set; }
 
+        /// <summary>Für Tests: Blickrichtung setzen, ohne die Position anzufassen (online wichtig, die gehört dem Server).</summary>
+        public void TestLook(float yaw, float pitch)
+        {
+            _yaw = yaw;
+            _pitch = pitch;
+        }
+
+        /// <summary>Für Tests: wie ein Klick – im nächsten Tick den anvisierten Block abbauen oder bauen.</summary>
+        public void TestEdit(bool remove)
+        {
+            if (remove) _removeRequested = true;
+            else _placeRequested = true;
+        }
+
         /// <summary>Ergebnis der letzten Aktion und wann sie war (für das HUD).</summary>
         public BlockEditResult LastEditResult { get; private set; } = BlockEditResult.Ok;
         public float LastEditTime { get; private set; }
 
-        public void Initialize(LocalGame game, Vec3 spawn, Material highlightMaterial)
+        public void Initialize(GameClient game, Vec3 spawn, Material highlightMaterial)
         {
             _game = game;
             _camera = GetComponent<Camera>();
@@ -87,7 +110,11 @@ namespace AoS2.Client.Player
             if (keyboard.escapeKey.wasPressedThisFrame)
             {
                 if (Cursor.lockState == CursorLockMode.Locked) SetCursorLocked(false);
-                else Application.Quit();
+                else
+                {
+                    _game.LeaveToMenu();
+                    return;
+                }
             }
             if (Cursor.lockState != CursorLockMode.Locked)
             {
@@ -124,7 +151,17 @@ namespace AoS2.Client.Player
         {
             _previous = _state;
             var input = new PlayerInput { Buttons = ReadButtons(), Yaw = _yaw, Pitch = _pitch };
-            _state = PlayerMovement.Step(_state, input, _game.World, _game.Movement);
+            var session = _game.Session;
+            if (session != null)
+            {
+                // Online: vorhersagen und die Eingabe an den Server schicken (siehe ClientPrediction).
+                session.Tick(input);
+                _state = session.Prediction.State;
+            }
+            else
+            {
+                _state = PlayerMovement.Step(_state, input, _game.World, _game.Movement);
+            }
 
             // Stufe hochgestiegen: Kamera gleitet nach, statt einen Block hochzuspringen. Die Höhe darf dann
             // nicht zusätzlich zwischen den Ticks interpoliert werden, sonst sackt die Kamera kurz einen Block ab.
@@ -141,6 +178,27 @@ namespace AoS2.Client.Player
             _placeRequested = false;
         }
 
+        /// <summary>
+        /// Online: Der Abgleich mit dem Server hat die Position um <paramref name="correction"/> verschoben.
+        /// Die Simulation übernimmt das sofort, die Kamera gleitet in wenigen Bildern hinterher statt zu springen.
+        /// </summary>
+        public void ApplyNetworkCorrection(Vec3 correction)
+        {
+            if (_game.Session == null) return;
+            _state = _game.Session.Prediction.State;
+            if (correction.Equals(Vec3.Zero)) return;
+            _previous.Position = _previous.Position + correction;
+            _correctionOffset -= ToUnity(correction);
+            if (_correctionOffset.magnitude > MaxSmoothedCorrection) _correctionOffset = Vector3.zero;
+        }
+
+        /// <summary>Der Server hat eine Blockänderung abgelehnt (die Vorhersage ist schon zurückgenommen).</summary>
+        public void ShowEditResult(BlockEditResult result)
+        {
+            LastEditResult = result;
+            LastEditTime = Time.time;
+        }
+
         /// <summary>Kamera zwischen zwei Ticks setzen (alpha = 0 … 1).</summary>
         public void UpdateVisuals(float alpha)
         {
@@ -148,8 +206,9 @@ namespace AoS2.Client.Player
             var dt = Time.deltaTime;
             _visualEyeHeight = Mathf.Lerp(_visualEyeHeight, movement.EyeHeight(_state.Crouching), 1f - Mathf.Exp(-CrouchSmoothing * dt));
             _stepOffset = Mathf.Lerp(_stepOffset, 0f, 1f - Mathf.Exp(-StepSmoothing * dt));
+            _correctionOffset = Vector3.Lerp(_correctionOffset, Vector3.zero, 1f - Mathf.Exp(-CorrectionSmoothing * dt));
 
-            var feet = Vector3.Lerp(ToUnity(_previous.Position), ToUnity(_state.Position), alpha);
+            var feet = Vector3.Lerp(ToUnity(_previous.Position), ToUnity(_state.Position), alpha) + _correctionOffset;
             transform.SetPositionAndRotation(feet + Vector3.up * (_visualEyeHeight + _stepOffset), Quaternion.Euler(_pitch, _yaw, 0));
 
             Target = Raycast(out var hit) ? hit : (VoxelHit?)null;

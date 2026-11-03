@@ -4,6 +4,8 @@
     "references": [
         "AoS2.Client",
         "AoS2.Shared",
+        "AoS2.Net",
+        "LiteNetLib",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

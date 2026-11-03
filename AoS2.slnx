@@ -11,10 +11,15 @@
     <Project Path="libs/AoS2.Contracts/AoS2.Contracts.csproj" />
     <Project Path="libs/AoS2.JoinTickets.Tests/AoS2.JoinTickets.Tests.csproj" />
     <Project Path="libs/AoS2.JoinTickets/AoS2.JoinTickets.csproj" />
+    <Project Path="libs/AoS2.Net/AoS2.Net.csproj" />
     <Project Path="libs/AoS2.Shared.Tests/AoS2.Shared.Tests.csproj" />
     <Project Path="libs/AoS2.Shared/AoS2.Shared.csproj" />
     <Project Path="libs/AoS2.Updates.Tests/AoS2.Updates.Tests.csproj" />
     <Project Path="libs/AoS2.Updates/AoS2.Updates.csproj" />
+  </Folder>
+  <Folder Name="/server/">
+    <Project Path="server/AoS2.Server.Tests/AoS2.Server.Tests.csproj" />
+    <Project Path="server/AoS2.Server/AoS2.Server.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/AoS2.ManifestBuilder.Tests/AoS2.ManifestBuilder.Tests.csproj" />

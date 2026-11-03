@@ -68,7 +68,8 @@ aceofspades2/
 │  ├─ AoS2.Updates.Tests/
 │  ├─ AoS2.Contracts/          Datenformate der Backend-API (DTOs), auch als Unity-Package
 │  ├─ AoS2.JoinTickets/        Join-Tickets ausstellen (Backend) und prüfen (Spielserver)
-│  └─ AoS2.JoinTickets.Tests/
+│  ├─ AoS2.JoinTickets.Tests/
+│  └─ AoS2.Net/                Netzwerkverbindung des Clients (LiteNetLib), auch als Unity-Package
 ├─ tools/
 │  ├─ AoS2.MapConverter/       MagicaVoxel (.vox) → .aos2map
 │  ├─ AoS2.ManifestBuilder/    Erzeugt das Update-Manifest
@@ -112,11 +113,30 @@ Der Client schickt nur **Eingaben** und **Absichten** („ich drücke W“, „i
 | Nachrichtentyp | Kanal | Beispiel |
 |---|---|---|
 | Eingaben | unzuverlässig, jeweils mit den letzten Eingaben als Puffer | Bewegung, Blickrichtung, Feuern |
-| Snapshots | unzuverlässig | Positionen aller Spieler |
+| Snapshots | unzuverlässig, nur der neueste zählt (Sequenced) | Positionen aller Spieler, Fallhöhe fallender Gruppen |
 | Weltänderungen | zuverlässig, geordnet | Block entfernt/gesetzt, Blockgruppe fällt |
-| Spielereignisse | zuverlässig | Kill, Punktestand, Spieler beigetreten |
+| Spielereignisse | zuverlässig, geordnet | Kill, Punktestand, Spieler beigetreten |
 
 Serialisierung: eigene, schlanke Binär-Serializer in `AoS2.Shared` (keine Reflection, gut testbar).
+
+### Umsetzung (seit M4)
+
+| Teil | Wo | Aufgabe |
+|---|---|---|
+| Protokoll | `AoS2.Shared/Net` (`NetWriter`, `NetReader`, `Messages.cs`) | Nachrichten Feld für Feld schreiben/lesen; alles aus dem Netz wird geprüft, Fehler sind immer `ProtocolException` |
+| Client-Logik | `AoS2.Shared/Net/Client` (`ClientSession`, `ClientPrediction`, `InterpolationBuffer`, `PredictedBlocks`, `NetFallingGroups`) | Vorhersage, Abgleich, Interpolation, vorab gezeigte Blockänderungen – ohne Unity und ohne Transport, deshalb in .NET testbar |
+| Transport Client | `libs/AoS2.Net` (`NetClient`) | LiteNetLib-Verbindung; reicht Bytes an die `ClientSession` weiter. Unity-Package und .NET-Projekt wie `AoS2.Shared` |
+| Server | `server/AoS2.Server` (`Match`, `GameServer`, `TicketCheck`) | `Match` ist die Simulation ohne Netzwerk-Code, `GameServer` hängt sie an LiteNetLib |
+
+`AoS2.Shared` kennt LiteNetLib nicht. **LiteNetLib** (2.1.4) kommt im Server und in `AoS2.Net` als NuGet-Paket. In Unity liegt es als Quellcode eingebettet in `client/Packages/com.revenantx.litenetlib`, wie der Autor es für Unity empfiehlt (Quellcode statt DLL). Eingebettet, weil Unity 6 Pakete aus fremden Registries wie OpenUPM bei jedem Start als unsigniert meldet und ein Git-Link nicht geht (im LiteNetLib-Repository fehlen die `.meta`-Dateien). Neue Version: `./tools/dev/update-litenetlib.ps1 -Version x.y.z` (vergleicht mit dem GitHub-Tag), dann dieselbe Version in beiden `.csproj` eintragen.
+
+**Ablauf eines Ticks:** Der Client rechnet jeden Tick sofort (Vorhersage), merkt sich Eingabe und Ergebnis und schickt die noch unbestätigten Eingaben (bis 16) unzuverlässig an den Server. Der Server rechnet pro Spieler höchstens eine Eingabe pro Tick im Mittel (Guthaben von 8 für Ruckler; wer schneller sendet, dem werden Eingaben verworfen). Alle 2 Ticks schickt er jedem Client einen Snapshot: den eigenen Zustand in voller Genauigkeit plus „letzte verarbeitete Eingabe k“, andere Spieler gerundet. Der Client setzt sich auf den Server-Zustand nach k und rechnet die neueren Eingaben neu; weil der Bewegungscode deterministisch ist, kommt ohne äußere Einflüsse bitgenau dasselbe heraus. Eine echte Korrektur (z. B. ein anderer Spieler hat einen Block weggenommen) übernimmt die Simulation sofort, die Kamera gleitet in wenigen Bildern hinterher.
+
+**Andere Spieler** zeigt der Client 6 Ticks (100 ms) hinter der geschätzten Server-Zeit, zwischen zwei Snapshots interpoliert. Die Server-Zeit schätzt er aus den Tick-Nummern der Snapshots (`ServerClock`).
+
+**Blockänderungen:** Der Client prüft die Regeln vorab, zeigt die Änderung sofort und schickt die Absicht zuverlässig mit dem Eingabe-Tick, nach dem sie passiert ist. Der Server prüft sie mit dem Zustand des Spielers genau zu diesem Tick (Pause seit der letzten Aktion, Strahl vom Auge muss genau diesen Block treffen, Reichweite, Regeln aus `BlockEditing`, beim Bauen kein Spieler im Weg), verteilt angenommene Änderungen an alle und antwortet dem Absender. Lehnt er ab, nimmt der Client seine Vorhersage zurück.
+
+Lokal testen und Server-Optionen: [server.md](server.md).
 
 ### Begriffe (für den Einstieg)
 
@@ -157,7 +177,7 @@ Code: `AoS2.Shared/Voxels` (`VoxelWorld`, `BlockRegistry`, `VoxelRaycast`). Bloc
 
 ### Bewegung
 
-- Ein Tick = ein Aufruf von `PlayerMovement.Step` (`AoS2.Shared/Movement`), 60 Ticks/s. Der Client rechnet in festen Ticks und interpoliert die Anzeige dazwischen; ab M4 rechnet der Server mit demselben Code.
+- Ein Tick = ein Aufruf von `PlayerMovement.Step` (`AoS2.Shared/Movement`), 60 Ticks/s. Der Client rechnet in festen Ticks und interpoliert die Anzeige dazwischen; der Server rechnet mit demselben Code.
 - Deterministisch: gleicher Zustand + gleiche Eingabe ergibt bitgleich dasselbe Ergebnis. Dafür nur float-Grundrechenarten und eigene Sinus/Kosinus-Näherungen (`DetMath`), kein `System.Numerics`, keine Zufallswerte.
 - Kollision: senkrechter Quader, 0,8 Blöcke breit, Höhe je Haltung aus `stances` in `data/player_rig.json` (stehend 1,90, geduckt 1,47). Bewegt wird Achse für Achse; am Boden steigt man Kanten bis 1 Block ohne Sprung hoch. Kartenränder und Kartenboden sind feste Wände.
 - Werte (Geschwindigkeiten, Sprunghöhe, Schwerkraft) stehen in `data/movement.json`.
@@ -168,16 +188,16 @@ Code: `AoS2.Shared/Voxels` (`VoxelWorld`, `BlockRegistry`, `VoxelRaycast`). Bloc
 2. Server prüft: Reichweite, Sichtlinie, Zone, Munition/Blockvorrat, Cooldown.
 3. Server ändert die Welt und schickt die Änderung an alle Clients.
 
-Beim Bauen darf der Client den Block vorab anzeigen und nimmt ihn wieder weg, falls der Server ablehnt.
+Der Client zeigt Abbauen und Bauen vorab an und nimmt die Änderung wieder weg, falls der Server ablehnt (Einzelheiten: Abschnitt 3, Umsetzung).
 
-Die Regeln (Reichweite 5 Blöcke, 0,2 s Pause, unzerstörbare Blöcke, nicht in den eigenen Quader bauen) stehen in `AoS2.Shared/Voxels/BlockEditing.cs`. In M3 prüft sie der Client allein.
+Die Regeln (Reichweite 5 Blöcke, 0,2 s Pause, unzerstörbare Blöcke, nicht in den eigenen Quader bauen) stehen in `AoS2.Shared/Voxels/BlockEditing.cs`. Client (vorab) und Server (verbindlich) prüfen dieselben Regeln; nur der Server prüft zusätzlich Sichtlinie, Pause und andere Spieler im Weg. Zonen und Blockvorrat kommen mit M6.
 
 ### Fallende Blöcke
 
 1. Nach jedem entfernten Block prüft der Server die Nachbarblöcke: Hängen sie noch (über andere Blöcke) mit dem Boden zusammen? Das ist eine Flutfüllung (Flood Fill) mit Obergrenze. Verbunden heißt: über gemeinsame Seiten. Boden ist die unterste Blockschicht. Die Suche geht zuerst nach unten und bricht ab, sobald sie den Boden erreicht; findet sie mehr als 8192 Blöcke, gilt die Gruppe als verankert (`FloatingBlocks`).
 2. Eine Gruppe ohne Verbindung wird aus der Welt entfernt und wird zu einem **fallenden Objekt**.
 3. Das Objekt fällt senkrecht und wird beim Aufprall wieder als Blöcke in die Welt gesetzt (`FallingBlocks`, gleiche Schwerkraft wie der Spieler).
-4. Clients sehen das Objekt wie andere bewegte Objekte (Snapshots + Interpolation).
+4. Clients bekommen Start (mit allen Blöcken) und Aufprall als zuverlässige Ereignisse, die Fallhöhe dazwischen per Snapshot, und interpolieren sie (`NetFallingGroups`, nur 2 Ticks verzögert, damit der Aufprall nicht springt). Offline rechnet der Client die Gruppen selbst.
 
 **Offen:** Schaden beim Aufprall (für Blöcke und Spieler).
 
@@ -258,7 +278,9 @@ Spielserver – auch Community-Server – bekommen **nie** das Sitzungstoken des
 
 1. Der Client fragt beim Backend ein **Join-Ticket** für einen bestimmten Server an.
 2. Das Ticket ist ein kurzlebiges, vom Backend signiertes JWT (Account-ID, Name, Ziel-Server, ca. 60 Sekunden gültig).
-3. Der Spielserver prüft die Signatur mit dem öffentlichen Schlüssel des Backends (`/api/.well-known/jwks.json`, Code in `libs/AoS2.JoinTickets`).
+3. Der Spielserver prüft die Signatur mit dem öffentlichen Schlüssel des Backends (`/api/.well-known/jwks.json`, Code in `libs/AoS2.JoinTickets`) und dass das Ticket noch nicht benutzt wurde.
+
+Zum lokalen Testen ohne Backend gibt es **Entwicklungs-Tickets**, die das Spiel selbst ausstellt. Sie nimmt nur ein Server an, der ausdrücklich mit `--dev` gestartet wurde ([server.md](server.md#2-entwicklungsmodus)).
 
 So kann ein Community-Server die Identität eines Spielers prüfen, ohne ihm Zugangsdaten anzuvertrauen.
 

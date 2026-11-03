@@ -13,21 +13,22 @@ namespace AoS2.Client.Tests
     /// Startet die echte Spielszene mit der Testmap: Welt wird angezeigt, der Spieler landet auf dem Spawn,
     /// Abbauen lässt eine Plattform fallen, Bauen setzt einen Block. Legt Screenshots in artifacts/screenshots ab.
     /// </summary>
-    public class LocalGameTests
+    public class OfflineGameTests
     {
-        private LocalGame _game;
+        private GameClient _game;
 
         [UnitySetUp]
         public IEnumerator LoadScene()
         {
-            // Erst warten, bis die Szene gewechselt hat; sonst ist Instance noch das LocalGame des vorigen Tests.
+            GameClient.StartOfflineImmediately = true;
+            // Erst warten, bis die Szene gewechselt hat; sonst ist Instance noch der GameClient des vorigen Tests.
             var loading = SceneManager.LoadSceneAsync("Game");
             while (!loading.isDone) yield return null;
             var timeout = Time.realtimeSinceStartup + 20f;
-            while ((LocalGame.Instance == null || (!LocalGame.Instance.IsReady && LocalGame.Instance.LoadError == null)) && Time.realtimeSinceStartup < timeout)
+            while ((GameClient.Instance == null || (!GameClient.Instance.IsReady && GameClient.Instance.LoadError == null)) && Time.realtimeSinceStartup < timeout)
                 yield return null;
-            _game = LocalGame.Instance;
-            Assert.IsNotNull(_game, "LocalGame fehlt in der Szene");
+            _game = GameClient.Instance;
+            Assert.IsNotNull(_game, "GameClient fehlt in der Szene");
             Assert.IsNull(_game.LoadError);
             Assert.IsTrue(_game.IsReady);
         }

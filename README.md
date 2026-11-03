@@ -13,6 +13,7 @@ Ein Team-Shooter (Blau gegen Grün) in einer vollständig zerstörbaren, blockar
 - [Maps bauen](docs/maps.md) – MagicaVoxel, Zuordnungsdatei, Metadaten, Map-Konverter
 - [Releases und Updates](docs/release.md) – Launcher, Update-Speicher (Cloudflare R2), Release-Workflow
 - [Website, Backend und Discord-Login](docs/backend.md) – Anmeldung, lokal entwickeln, Discord-App, Coolify
+- [Spielserver und Netzwerk](docs/server.md) – Server starten, Entwicklungsmodus, zwei Clients lokal verbinden
 
 ## Aufbau des Repositories
 
@@ -50,7 +51,7 @@ Alle Build-Ausgaben landen in `artifacts/`. Den Unity-Client öffnet man über U
 
 ## Lokal spielen (ohne Server)
 
-Im Unity-Editor die Szene `Assets/Scenes/Game.unity` öffnen und *Play* drücken. Das Spiel lädt `maps/testmap.aos2map`; ins Spielfenster klicken fängt die Maus.
+Im Unity-Editor die Szene `Assets/Scenes/Game.unity` öffnen, *Play* drücken und im Startmenü **Offline spielen** wählen. Das Spiel lädt `maps/testmap.aos2map`; ins Spielfenster klicken fängt die Maus.
 
 | Taste | Aktion |
 |---|---|
@@ -62,9 +63,17 @@ Im Unity-Editor die Szene `Assets/Scenes/Game.unity` öffnen und *Play* drücken
 | Linksklick | Block abbauen |
 | Rechtsklick | Block bauen |
 | 1–9, Mausrad | Baublock wählen |
-| Esc | Maus freigeben (im Build zweimal: beenden) |
+| Esc | Maus freigeben (zweimal: zurück ins Startmenü) |
 
 Blocktypen stehen in `data/blocks.json`, Bewegungswerte in `data/movement.json`; im Editor wirken Änderungen beim nächsten *Play*.
+
+## Mit Server spielen (lokal, zwei Clients)
+
+```powershell
+dotnet run --project server/AoS2.Server -- --dev   # Server im Entwicklungsmodus, eigenes Terminal
+```
+
+Dann im Editor *Play* und im Startmenü mit `127.0.0.1:32887` und Haken bei **Entwicklungs-Ticket** verbinden; ein Windows-Build (*AoS2 → Windows-Build erstellen*) ist der zweite Client. Ausführlich: [docs/server.md](docs/server.md).
 
 Launcher und Spiel lokal ausprobieren, mit lokaler Website, lokalem Backend und Entwicklungs-Login statt Discord (Details in [docs/backend.md](docs/backend.md#3-lokal-entwickeln) und [docs/release.md](docs/release.md#5-ohne-r2-lokal-testen)):
 

@@ -6,10 +6,22 @@
       "source": "local",
       "dependencies": {}
     },
+    "com.aos2.net": {
+      "version": "file:../../libs/AoS2.Net",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
     "com.aos2.shared": {
       "version": "file:../../libs/AoS2.Shared",
       "depth": 0,
       "source": "local",
+      "dependencies": {}
+    },
+    "com.revenantx.litenetlib": {
+      "version": "file:com.revenantx.litenetlib",
+      "depth": 0,
+      "source": "embedded",
       "dependencies": {}
     },
     "com.unity.burst": {

@@ -12,10 +12,17 @@ namespace AoS2.Shared.Voxels
         Occupied,
         BlockedByPlayer,
         NothingThere,
+
+        /// <summary>Server: Die Pause seit der letzten Aktion war zu kurz.</summary>
+        TooFast,
+
+        /// <summary>Server: Vom Auge aus trifft der Blick nicht genau diesen Block (verdeckt oder geschummelt).</summary>
+        NoLineOfSight,
     }
 
     /// <summary>
-    /// Regeln fürs Abbauen und Bauen. Heute prüft sie der Client allein; ab M4 prüft der Server dieselben Regeln.
+    /// Regeln fürs Abbauen und Bauen. Der Client prüft sie vorab (damit er die Änderung sofort zeigen kann),
+    /// der Server prüft dieselben Regeln noch einmal und hat das letzte Wort.
     /// </summary>
     public static class BlockEditing
     {

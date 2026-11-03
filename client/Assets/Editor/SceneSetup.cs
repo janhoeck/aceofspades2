@@ -7,7 +7,7 @@ using UnityEngine;
 namespace AoS2.Editor
 {
     /// <summary>
-    /// Richtet die Spielszene ein: ein GameObject „LocalGame“ mit den Shadern der Blockwelt.
+    /// Richtet die Spielszene ein: ein GameObject „GameClient“ mit den Shadern der Blockwelt.
     /// Kann beliebig oft laufen. Aufruf im Batchmode:
     /// <code>Unity.exe -batchmode -quit -projectPath client -executeMethod AoS2.Editor.SceneSetup.Run</code>
     /// </summary>
@@ -27,8 +27,8 @@ namespace AoS2.Editor
             }
 
             var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
-            var game = Object.FindAnyObjectByType<LocalGame>();
-            if (game == null) game = new GameObject("LocalGame").AddComponent<LocalGame>();
+            var game = Object.FindAnyObjectByType<GameClient>();
+            if (game == null) game = new GameObject("GameClient").AddComponent<GameClient>();
 
             var serialized = new SerializedObject(game);
             serialized.FindProperty("voxelShader").objectReferenceValue = Shader.Find("AoS2/Voxel");

@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "com.aos2.contracts": "file:../../libs/AoS2.Contracts",
+    "com.aos2.net": "file:../../libs/AoS2.Net",
     "com.aos2.shared": "file:../../libs/AoS2.Shared",
     "com.unity.burst": "2.0.0",
     "com.unity.collections": "6.6.0",

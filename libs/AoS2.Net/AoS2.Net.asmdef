@@ -1,0 +1,17 @@
+{
+    "name": "AoS2.Net",
+    "rootNamespace": "AoS2.Net",
+    "references": [
+        "AoS2.Shared",
+        "LiteNetLib"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

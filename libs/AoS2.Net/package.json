@@ -1,0 +1,7 @@
+{
+  "name": "com.aos2.net",
+  "version": "0.0.0",
+  "displayName": "AoS2 Net",
+  "description": "Netzwerkverbindung des Clients zum Spielserver (LiteNetLib). Braucht com.revenantx.litenetlib in derselben Version wie AoS2.Net.csproj.",
+  "unity": "6000.0"
+}

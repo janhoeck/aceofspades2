@@ -46,29 +46,49 @@ public sealed class JoinTicketIssuer(JoinTicketSigningKey key, string issuer, Ti
 }
 
 /// <summary>Prüft Join-Tickets (Spielserver). Braucht nur den öffentlichen Schlüssel des Backends.</summary>
-/// <param name="publicKeySet">JSON Web Key Set vom Backend (<c>/.well-known/jwks.json</c>).</param>
-/// <param name="issuer">Adresse des Backends, dem der Server vertraut.</param>
-/// <param name="server">Name dieses Spielservers, so wie Clients ihn beim Ticket angeben.</param>
-public sealed class JoinTicketValidator(string publicKeySet, string issuer, string server, TimeProvider time)
+public sealed class JoinTicketValidator
 {
     /// <summary>Uhren von Backend und Spielserver gehen nie ganz gleich.</summary>
     public static readonly TimeSpan ClockSkew = TimeSpan.FromSeconds(30);
 
     private readonly JsonWebTokenHandler _handler = new();
-    private readonly TokenValidationParameters _parameters = new()
+    private readonly TokenValidationParameters _parameters;
+
+    /// <param name="publicKeySet">JSON Web Key Set vom Backend (<c>/.well-known/jwks.json</c>).</param>
+    /// <param name="issuer">Adresse des Backends, dem der Server vertraut.</param>
+    /// <param name="server">Name dieses Spielservers, so wie Clients ihn beim Ticket angeben.</param>
+    public JoinTicketValidator(string publicKeySet, string issuer, string server, TimeProvider time)
+        : this(time, issuer, JoinTicketIssuer.NormalizeServer(server), new JsonWebKeySet(publicKeySet).GetSigningKeys(), JoinTicketSigningKey.Algorithm)
     {
-        ValidIssuer = issuer,
-        ValidAudience = JoinTicketIssuer.NormalizeServer(server),
-        IssuerSigningKeys = new JsonWebKeySet(publicKeySet).GetSigningKeys(),
-        ValidAlgorithms = [JoinTicketSigningKey.Algorithm],
-        RequireSignedTokens = true,
-        RequireExpirationTime = true,
-        LifetimeValidator = (notBefore, expires, _, _) =>
+    }
+
+    private JoinTicketValidator(TimeProvider time, string issuer, string audience, IEnumerable<SecurityKey> keys, string algorithm)
+    {
+        _parameters = new TokenValidationParameters
         {
-            var now = time.GetUtcNow().UtcDateTime;
-            return notBefore is { } nbf && expires is { } exp && now >= nbf - ClockSkew && now <= exp + ClockSkew;
-        },
-    };
+            ValidIssuer = issuer,
+            ValidAudience = audience,
+            IssuerSigningKeys = keys,
+            ValidAlgorithms = [algorithm],
+            RequireSignedTokens = true,
+            RequireExpirationTime = true,
+            LifetimeValidator = (notBefore, expires, _, _) =>
+            {
+                var now = time.GetUtcNow().UtcDateTime;
+                return notBefore is { } nbf && expires is { } exp && now >= nbf - ClockSkew && now <= exp + ClockSkew;
+            },
+        };
+    }
+
+    /// <summary>
+    /// <b>Nur zum Entwickeln:</b> Prüft Entwicklungs-Tickets, die der Client ohne Backend selbst ausstellt
+    /// (<c>AoS2.Shared.Net.DevJoinTicket</c>). Ihr Schlüssel ist öffentlich bekannt, jeder kann solche Tickets fälschen.
+    /// Ein Spielserver nutzt diesen Prüfer nur, wenn er ausdrücklich im Entwicklungsmodus gestartet wurde.
+    /// </summary>
+    /// <param name="sharedKey">Der Testschlüssel (<c>DevJoinTicket.Key</c>).</param>
+    /// <param name="issuer">Aussteller und Empfänger der Entwicklungs-Tickets (<c>DevJoinTicket.Issuer</c>).</param>
+    public static JoinTicketValidator ForDevelopment(byte[] sharedKey, string issuer, TimeProvider time) =>
+        new(time, issuer, issuer, [new SymmetricSecurityKey(sharedKey)], SecurityAlgorithms.HmacSha256);
 
     /// <summary>Gibt das Ticket zurück, wenn es echt, für diesen Server und noch gültig ist, sonst <c>null</c>.</summary>
     public async Task<JoinTicket?> ValidateAsync(string ticket)

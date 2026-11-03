@@ -260,7 +260,7 @@ Fehlt eine Pflicht-Einstellung, startet das Backend nicht bzw. die Login-Seiten 
 
 **Launcher:** `AOS2_SITE_URL` (zum Testen) bzw. beim Bauen `-p:AoS2SiteUrl=…` (`pack-launcher.ps1 -SiteUrl …`).
 
-## 6. Join-Tickets (für M4)
+## 6. Join-Tickets
 
 Ein Join-Ticket ist ein JWT, signiert mit ECDSA P-256 (ES256), 60 Sekunden gültig:
 
@@ -281,7 +281,7 @@ var validator = new JoinTicketValidator(keys, "https://aos2.example.org", "play.
 var ticket = await validator.ValidateAsync(ticketVomClient);   // null = ungültig
 ```
 
-Der Server prüft Signatur, Aussteller, Zielserver und Ablauf (30 Sekunden Toleranz für ungenaue Uhren). Damit jedes Ticket nur einmal gilt, merkt er sich die `TicketId` bis zum Ablauf. Das kommt mit M4.
+Der Server prüft Signatur, Aussteller, Zielserver und Ablauf (30 Sekunden Toleranz für ungenaue Uhren). Damit jedes Ticket nur einmal gilt, merkt er sich die `TicketId` bis zum Ablauf (`server/AoS2.Server/TicketCheck.cs`). Server-Optionen und lokales Testen: [server.md](server.md).
 
 ## 7. Wenn etwas schiefgeht
 

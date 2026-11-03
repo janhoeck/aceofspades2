@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Client-Seite der Netzwerkverbindung über LiteNetLib. Wird vom Client (Unity) und von den Server-Tests genutzt.
+       Regeln wie bei AoS2.Shared: keine Unity-Referenzen, maximal C# 9, nur .NET Standard 2.1-APIs.
+       In Unity liegt LiteNetLib als Quellcode in client/Packages/com.revenantx.litenetlib, hier kommt es als NuGet-Paket;
+       beide in derselben Version. -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <RootNamespace>AoS2.Net</RootNamespace>
+    <!-- Unity kompiliert ohne Nullable-Kontext; mit "enable" gäbe es dort Warnungen. -->
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LiteNetLib" Version="2.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AoS2.Shared\AoS2.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Dateien des Unity-Packages gehören nicht in den .NET-Build. -->
+    <None Remove="**/*.meta" />
+  </ItemGroup>
+
+</Project>

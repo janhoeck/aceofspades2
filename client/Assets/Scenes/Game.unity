@@ -443,7 +443,7 @@ GameObject:
   - component: {fileID: 1508907363}
   - component: {fileID: 1508907362}
   m_Layer: 0
-  m_Name: LocalGame
+  m_Name: GameClient
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -460,7 +460,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 3c0a93b0973f0a64581807c174c82f2b, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: AoS2.Client::AoS2.Client.LocalGame
+  m_EditorClassIdentifier: AoS2.Client::AoS2.Client.GameClient
   voxelShader: {fileID: 4800000, guid: 5b29ee62062bafd4ea4459a3edc5eb33, type: 3}
   lineShader: {fileID: 4800000, guid: 94f87d889e9a46743b3fd93088bd7a87, type: 3}
   mapName: testmap

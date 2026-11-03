@@ -34,6 +34,8 @@ namespace AoS2.Client.Account
         /// <summary>Das eigene Konto, sobald <see cref="State"/> <see cref="AccountState.SignedIn"/> ist.</summary>
         public static AccountInfo Account { get; private set; }
 
+        public static bool IsSignedIn => State == AccountState.SignedIn;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Create()
         {

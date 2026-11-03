@@ -12,7 +12,7 @@ namespace AoS2.Shared.Voxels
             Blocks = blocks;
         }
 
-        /// <summary>Fortlaufende Nummer (für die Darstellung im Client, ab M4 fürs Netzwerk).</summary>
+        /// <summary>Fortlaufende Nummer (für die Darstellung im Client und im Netzwerk).</summary>
         public int Id { get; }
 
         /// <summary>Blöcke an ihrer Ausgangsposition (vor dem Fallen).</summary>
@@ -28,10 +28,25 @@ namespace AoS2.Shared.Voxels
     }
 
     /// <summary>
+    /// Fallende Gruppen, wie die Darstellung sie sieht. Offline und auf dem Server rechnet <see cref="FallingBlocks"/>
+    /// sie selbst, im Netzspiel kommen sie vom Server (<see cref="Net.Client.NetFallingGroups"/>).
+    /// </summary>
+    public interface IFallingGroups
+    {
+        IReadOnlyList<FallingGroup> Groups { get; }
+
+        /// <summary>Eine Gruppe beginnt zu fallen (ihre Blöcke stehen nicht mehr in der Welt).</summary>
+        event Action<FallingGroup> Started;
+
+        /// <summary>Eine Gruppe ist aufgeschlagen und steht wieder in der Welt (um <c>landedOffset</c> Blöcke tiefer).</summary>
+        event Action<FallingGroup, int> Landed;
+    }
+
+    /// <summary>
     /// Lässt schwebende Gruppen senkrecht fallen und setzt sie beim Aufprall wieder als Blöcke in die Welt.
     /// Ein Aufruf von <see cref="Tick"/> = ein Simulationsschritt; rechnet auf Client und Server gleich.
     /// </summary>
-    public sealed class FallingBlocks
+    public sealed class FallingBlocks : IFallingGroups
     {
         private readonly VoxelWorld _world;
         private readonly List<FallingGroup> _groups = new List<FallingGroup>();
