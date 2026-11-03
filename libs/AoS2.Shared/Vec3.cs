@@ -27,7 +27,26 @@ namespace AoS2.Shared
         public static Vec3 operator -(Vec3 a, Vec3 b) => new Vec3(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
         public static Vec3 operator *(Vec3 a, float s) => new Vec3(a.X * s, a.Y * s, a.Z * s);
 
+        public static Vec3 operator -(Vec3 a) => new Vec3(-a.X, -a.Y, -a.Z);
+
         public float Length => DetMath.Sqrt(X * X + Y * Y + Z * Z);
+        public float LengthSquared => X * X + Y * Y + Z * Z;
+
+        public static float Dot(Vec3 a, Vec3 b) => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+
+        public static Vec3 Lerp(Vec3 a, Vec3 b, float t) => a + (b - a) * t;
+
+        public static float Distance(Vec3 a, Vec3 b) => (b - a).Length;
+
+        /// <summary>Gleiche Richtung, Länge 1 (der Nullvektor bleibt null).</summary>
+        public Vec3 Normalized
+        {
+            get
+            {
+                var length = Length;
+                return length > 0 ? new Vec3(X / length, Y / length, Z / length) : Zero;
+            }
+        }
 
         public bool Equals(Vec3 other) => X.Equals(other.X) && Y.Equals(other.Y) && Z.Equals(other.Z);
         public override bool Equals(object obj) => obj is Vec3 other && Equals(other);

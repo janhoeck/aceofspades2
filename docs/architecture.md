@@ -75,7 +75,7 @@ aceofspades2/
 │  ├─ AoS2.ManifestBuilder/    Erzeugt das Update-Manifest
 │  ├─ AoS2.ManifestBuilder.Tests/
 │  └─ release/                 Release-Skripte: Unity-Build, Upload, Velopack
-├─ data/                       blocks.json, classes.json, weapons.json
+├─ data/                       blocks.json, movement.json, player_rig.json, combat.json, weapons.json (classes.json ab M8)
 ├─ maps/                       Map-Quellen und gebaute Maps
 ├─ assets-src/                 Quelldateien der Assets (siehe docs/assets.md)
 ├─ deploy/                     Docker-/Compose-Dateien für Coolify
@@ -115,7 +115,7 @@ Der Client schickt nur **Eingaben** und **Absichten** („ich drücke W“, „i
 | Eingaben | unzuverlässig, jeweils mit den letzten Eingaben als Puffer | Bewegung, Blickrichtung, Feuern |
 | Snapshots | unzuverlässig, nur der neueste zählt (Sequenced) | Positionen aller Spieler, Fallhöhe fallender Gruppen |
 | Weltänderungen | zuverlässig, geordnet | Block entfernt/gesetzt, Blockgruppe fällt |
-| Spielereignisse | zuverlässig, geordnet | Kill, Punktestand, Spieler beigetreten |
+| Spielereignisse | zuverlässig, geordnet | Treffer, Kill, Schuss eines anderen, Geschoss gestartet/explodiert, Blockschaden, Spieler beigetreten |
 
 Serialisierung: eigene, schlanke Binär-Serializer in `AoS2.Shared` (keine Reflection, gut testbar).
 
@@ -124,9 +124,9 @@ Serialisierung: eigene, schlanke Binär-Serializer in `AoS2.Shared` (keine Refle
 | Teil | Wo | Aufgabe |
 |---|---|---|
 | Protokoll | `AoS2.Shared/Net` (`NetWriter`, `NetReader`, `Messages.cs`) | Nachrichten Feld für Feld schreiben/lesen; alles aus dem Netz wird geprüft, Fehler sind immer `ProtocolException` |
-| Client-Logik | `AoS2.Shared/Net/Client` (`ClientSession`, `ClientPrediction`, `InterpolationBuffer`, `PredictedBlocks`, `NetFallingGroups`) | Vorhersage, Abgleich, Interpolation, vorab gezeigte Blockänderungen – ohne Unity und ohne Transport, deshalb in .NET testbar |
+| Client-Logik | `AoS2.Shared/Net/Client` (`ClientSession`, `ClientPrediction`, `InterpolationBuffer`, `PredictedBlocks`, `NetFallingGroups`, `NetProjectiles`) | Vorhersage (Bewegung und Waffen), Abgleich, Interpolation, vorab gezeigte Blockänderungen, Geschossbahnen – ohne Unity und ohne Transport, deshalb in .NET testbar |
 | Transport Client | `libs/AoS2.Net` (`NetClient`) | LiteNetLib-Verbindung; reicht Bytes an die `ClientSession` weiter. Unity-Package und .NET-Projekt wie `AoS2.Shared` |
-| Server | `server/AoS2.Server` (`Match`, `GameServer`, `TicketCheck`) | `Match` ist die Simulation ohne Netzwerk-Code, `GameServer` hängt sie an LiteNetLib |
+| Server | `server/AoS2.Server` (`Match`, `Match.Combat`, `GameServer`, `TicketCheck`) | `Match` ist die Simulation ohne Netzwerk-Code (Kampf in `Match.Combat.cs`), `GameServer` hängt sie an LiteNetLib |
 
 `AoS2.Shared` kennt LiteNetLib nicht. **LiteNetLib** (2.1.4) kommt im Server und in `AoS2.Net` als NuGet-Paket. In Unity liegt es als Quellcode eingebettet in `client/Packages/com.revenantx.litenetlib`, wie der Autor es für Unity empfiehlt (Quellcode statt DLL). Eingebettet, weil Unity 6 Pakete aus fremden Registries wie OpenUPM bei jedem Start als unsigniert meldet und ein Git-Link nicht geht (im LiteNetLib-Repository fehlen die `.meta`-Dateien). Neue Version: `./tools/dev/update-litenetlib.ps1 -Version x.y.z` (vergleicht mit dem GitHub-Tag), dann dieselbe Version in beiden `.csproj` eintragen.
 
@@ -155,7 +155,44 @@ Ziel: Die Trefferzonen passen **immer exakt** zum sichtbaren Modell und seiner a
 - **Lag-Ausgleich spult auch die Pose zurück:** Der Server speichert pro Tick den Animationszustand jedes Spielers und prüft einen Schuss gegen die Pose, die der Schütze gesehen hat.
 - **Prüfung des Schusses:** Strahl gegen gedrehte Quader (OBB) der Trefferboxen des Gegners, zuerst grob gegen eine umschließende Kugel.
 - **Bewegungs-Kollision** mit der Welt bleibt ein einfacher Quader (sonst ruckelt die Bewegung an Kanten). Seine Höhe je Haltung kommt ebenfalls aus dem Modell (`stances` in `player_rig.json`): z. B. geduckt ca. 1,47 Blöcke, mit Helm ca. 1,55.
-- **Offen:** Schadensfaktoren je Zone; ob die Trefferzonen der Waffe in der Hand dazugehören.
+- **Umsetzung (seit M5):** `AoS2.Shared/Rig` – `PlayerRig` liest `player_rig.json`, `PlayerAnimator` führt den Animationszustand (`AnimationState`: Animation, Start-Tick, vorige Animation, Überblendung über 8 Ticks), `PlayerPose` rechnet die Knochenmatrizen und die Trefferboxen in der Welt, `Combat/Geometry` prüft Strahl gegen Kugel und OBB. Getestet gegen die Werte, die `export-rig.mjs --check` direkt aus den Blockbench-Keyframes rechnet.
+- **Feste Regeln zusätzlich zu den Blockbench-Animationen:** Der Kopf neigt sich mit dem Blick (75 %, höchstens 60°). Mit einer Waffe in der Hand zeigen beide Arme in Blickrichtung (Zielhaltung, gleicht eine Neigung des Körpers aus). Beides rechnet `PlayerPose` auf beiden Seiten gleich. Eine Zielhaltung aus Blockbench kann sie später ersetzen.
+- **Modell und Welt:** Blockbench rechnet rechtshändig mit Blick nach −z, Unity linkshändig mit Blick nach +z. Der Übergang ist eine Spiegelung von z, nicht eine halbe Drehung (sonst wäre der rechte Arm links): `PlayerPose.ModelToWorld`. Der Client baut das sichtbare Modell aus denselben Würfeln (`player_rig.json` enthält dafür auch die Texturkoordinaten jeder Seite) und setzt die Knochen jedes Bild aus der `PlayerPose`.
+- **Schadensfaktoren je Zone** (Entscheidung M5, `data/combat.json`): Kopf ×2, Rumpf ×1, Arme ×0,67, Beine ×0,67 (wie das Original: ein Kopfschuss mit 50 Grundschaden tötet). Gilt für Hitscan-Treffer; Explosionen zählen ohne Zone.
+- **Waffe in der Hand** hat keine Trefferzone (Entscheidung M5): Sie wird im Client an die rechte Hand gehängt, ist aber kein Würfel des Spielermodells.
+- **Offen:** Zählen dünne Ausrüstungsteile (Klassen ab M8) als Treffer? In M5 trägt niemand Ausrüstung (Klasse „none“).
+
+### Kampf (seit M5)
+
+Werte stehen in `data/combat.json` (Leben, Respawn-Zeit, Selbstschaden, Zonenfaktoren, Wechselzeit, wie weit der Lag-Ausgleich zurückspult) und `data/weapons.json` (Waffen in Platz-Reihenfolge; Platz 1 ist immer der Spaten). Client und Server lesen dieselben Dateien (`CombatSettings`).
+
+| Teil | Wo | Aufgabe |
+|---|---|---|
+| Waffen-Simulation | `AoS2.Shared/Combat/WeaponState.cs` (`WeaponSim`) | Wechsel, Feuerpause, Magazin, Nachladen: deterministisch aus den Eingaben, wie die Bewegung |
+| Geschosse | `AoS2.Shared/Combat/Projectiles.cs` | Flug je Tick, Strahl gegen die Welt, Abprallen (Granate), Explosion bei Aufprall (Rakete) oder Zündzeit |
+| Explosionen | `AoS2.Shared/Combat/Explosions.cs`, `Voxels/BlockDamage.cs` | Schaden an Blöcken und Spielern, linear zum Rand hin weniger, Spieler nur mit Sichtlinie |
+| Server | `server/AoS2.Server/Match.Combat.cs` | Schuss prüfen (mit Lag-Ausgleich), Schaden, Tod, Respawn, Geschosse, Explosionen |
+| Client | `ClientSession` (Leben, Geschosse, Blockschaden, `CombatEvent`), Unity: `PlayerModel`, `WeaponView`, `CombatEffects`, `BlockCracksView`, `Hud` | Anzeige und Effekte |
+
+**Schießen ist eine Eingabe.** Feuern, Nachladen und die gewählte Waffe stecken in `PlayerInput` (Kanal Eingaben, mit den Wiederholungen der letzten Ticks). Client (Vorhersage) und Server rechnen daraus mit `WeaponSim` dasselbe: Der Client zeigt Mündungsfeuer, Leuchtspur und Munition sofort, der Server weiß aus derselben Rechnung, in welchem Eingabe-Tick ein Schuss fällt. Die Waffen des Spielers stehen im Snapshot wie die Position und werden genauso abgeglichen.
+
+**Lag-Ausgleich, Schritt für Schritt:**
+1. Der Client zeigt andere Spieler 100 ms in der Vergangenheit (Interpolation). Dazu kommt die Laufzeit der Snapshots. Wer schießt, zielt also auf eine Stelle, an der der Gegner auf dem Server schon nicht mehr steht.
+2. Mit der Feuern-Eingabe schickt der Client deshalb den Server-Tick mit, den er gerade zeigt (`ViewTick`, auf 1/256 Tick genau).
+3. Der Server merkt sich für jeden Spieler und jeden Tick genau das, was in den Snapshots über ihn steht (`ServerPlayer.RecordView`): Position, gerundeter Blick, Haltung, Waffe, Animationszustand. Der Verlauf reicht gut eine Sekunde zurück.
+4. Beim Schuss baut er daraus das Bild nach, das der Schütze gesehen hat: dieselbe Interpolation zwischen zwei Snapshots (`PlayerSnapshot.Lerp`, gemeinsamer Code), dieselbe Pose zum selben Zeitpunkt (`PlayerPose`).
+5. Gegen diese zurückgespulten Trefferboxen prüft er den Strahl vom Auge des Schützen (Stand und Blick aus genau diesem Eingabe-Tick). Blöcke prüft er in der aktuellen Welt; der nächste Treffer gewinnt, ein Block davor hält den Schuss auf.
+6. Zurückgespult wird höchstens `maxRewindSeconds` (0,5 s), damit ein Client mit riesigem Ping nicht um Ecken treffen kann.
+
+Folge: Wer auf das zielt, was er sieht, trifft. Der Getroffene kann dabei schon ein Stück hinter einer Ecke sein („um die Ecke gestorben“), das ist der übliche Preis. Ein Test spielt das mit 200 ms Ping durch (`CombatNetTests`).
+
+**Leben, Tod, Respawn:** Der Server führt die Lebenspunkte. Schaden, Kill und Schüsse anderer kommen als zuverlässige Spielereignisse (`PlayerDamaged`, `PlayerKilled`, `ShotFired`), die eigenen Lebenspunkte, der Respawn-Countdown und ob andere leben zusätzlich im Snapshot. Tote rechnen weiter Bewegung und Blick, aber ohne Tasten (Client und Server gleich). Nach `respawnSeconds` setzt der Server den Spieler an den nächsten Spawnpunkt, mit vollem Leben und voller Munition; der Client springt beim Abgleich mit. Ein Zähler `Life` im Snapshot verhindert, dass andere Clients zwischen Todesort und Spawn interpolieren.
+
+**Geschosse** (Granate, Rakete) fliegen nur auf dem Server. Start (Ort, Geschwindigkeit, Tick) und Explosion kommen als Ereignisse; dazwischen rechnet der Client die Bahn mit demselben Code zur Anzeige nach, so braucht ein Geschoss keinen Platz im Snapshot. Raketen explodieren auch am Kollisionsquader eines Spielers (nicht am Schützen). Geschosse haben keinen Lag-Ausgleich: Sie fliegen in Server-Zeit.
+
+**Explosionen:** Zuerst Spieler (Sichtlinie zu Füßen, Brust oder Kopf in der Welt vor der Explosion), dann Blöcke im `blockRadius`: Ihr Schaden zählt zum Blockschaden, zerstörte Blöcke verschwinden, danach fallen Gruppen ohne Verbindung zum Boden (eine gemeinsame Suche für alle zerstörten Blöcke). Eigene Explosionen schaden mit `selfDamage` (Entscheidung M5: voller Schaden).
+
+**Snapshot-Größe:** Ein anderer Spieler braucht bis zu 28 Byte. Bis etwa 33 Spieler passen alle in ein Paket (unter 1000 Byte); bei mehr Spielern kommen sie reihum dran und werden über längere Lücken interpoliert (der Lag-Ausgleich ist dann leicht ungenauer). Für 48 Spieler wären kompaktere Positionen nötig (M9).
 
 ## 4. Voxel-Welt
 
@@ -189,6 +226,8 @@ Code: `AoS2.Shared/Voxels` (`VoxelWorld`, `BlockRegistry`, `VoxelRaycast`). Bloc
 3. Server ändert die Welt und schickt die Änderung an alle Clients.
 
 Der Client zeigt Abbauen und Bauen vorab an und nimmt die Änderung wieder weg, falls der Server ablehnt (Einzelheiten: Abschnitt 3, Umsetzung).
+
+**Blockschaden (seit M5):** Kugeln (`blockDamage` je Treffer) und Explosionen ziehen Lebenspunkte ab (`health` in `blocks.json`). Gespeichert wird nur für beschädigte Blöcke (`BlockDamage`); ändert sich ein Block, ist sein Schaden vergessen. Clients bekommen den Schaden als Stufe 1 … 255 und zeigen vier Stufen Risse. Wer später beitritt, bekommt alle beschädigten Blöcke mit. Zerstörte Blöcke verschwinden wie beim Abbauen und können Gruppen fallen lassen.
 
 Die Regeln (Reichweite 5 Blöcke, 0,2 s Pause, unzerstörbare Blöcke, nicht in den eigenen Quader bauen) stehen in `AoS2.Shared/Voxels/BlockEditing.cs`. Client (vorab) und Server (verbindlich) prüfen dieselben Regeln; nur der Server prüft zusätzlich Sichtlinie, Pause und andere Spieler im Weg. Zonen und Blockvorrat kommen mit M6.
 

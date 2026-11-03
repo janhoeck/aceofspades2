@@ -82,6 +82,14 @@ namespace AoS2.Shared.Voxels
             return groups.Count;
         }
 
+        /// <summary>Wie <see cref="CheckAfterRemoval"/> für viele entfernte Blöcke auf einmal (z. B. nach einer Explosion).</summary>
+        public int CheckAfterRemovals(IReadOnlyList<BlockPos> removed, int maxGroupSize = FloatingBlocks.DefaultMaxGroupSize)
+        {
+            var groups = FloatingBlocks.FindDetached(_world, removed, maxGroupSize);
+            foreach (var blocks in groups) StartFalling(blocks);
+            return groups.Count;
+        }
+
         /// <summary>Nimmt die Blöcke aus der Welt und lässt sie fallen.</summary>
         public FallingGroup StartFalling(List<GroupBlock> blocks)
         {

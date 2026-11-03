@@ -463,6 +463,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: AoS2.Client::AoS2.Client.GameClient
   voxelShader: {fileID: 4800000, guid: 5b29ee62062bafd4ea4459a3edc5eb33, type: 3}
   lineShader: {fileID: 4800000, guid: 94f87d889e9a46743b3fd93088bd7a87, type: 3}
+  modelShader: {fileID: 4800000, guid: de9945da556da4f47b7893a5f819b252, type: 3}
   mapName: testmap
 --- !u!4 &1508907363
 Transform:

@@ -16,12 +16,14 @@ Ein Team-Shooter in einer vollständig zerstörbaren Block-Welt. Zwei Teams (**B
 | Punkt für das Team | 1 pro Kill eines Gegners | – |
 | Siegbedingung | erstes Team mit **50** Punkten | ja (Server-Config) |
 | Spieler pro Team | **16** (16 gegen 16) | ja (Server-Config) |
+| Leben | 100 | ja (`data/combat.json`) |
+| Respawn-Zeit | **5 Sekunden**, dann an einem Spawnpunkt mit vollem Leben und voller Munition | ja (`data/combat.json`) |
+| Eigene Explosionen | schaden **voll** (Faktor 1) | ja (`selfDamage` in `data/combat.json`) |
 
 Noch offen:
 - Gibt es ein Zeitlimit? Was passiert bei Gleichstand?
-- Teambeschuss (Friendly Fire): aus oder an?
-- Selbstmord / Fallschaden / von eigenen Blöcken erschlagen: Punktabzug oder nichts?
-- Respawn-Zeit (Vorschlag: 5 Sekunden)
+- Teambeschuss (Friendly Fire): aus oder an? (Bis M6 gibt es keine Teams, jeder kann jeden treffen.)
+- Selbstmord / Fallschaden / von eigenen Blöcken erschlagen: Punktabzug oder nichts? (Fallschaden gibt es noch nicht.)
 
 ## 3. Klassen
 
@@ -40,11 +42,25 @@ Waffen, Werte und Ausrüstung werden später festgelegt. Alle Klassen und Waffen
 
 Getroffen wird genau das, was man sieht: Jeder Würfel des Spielermodells ist eine eigene Trefferbox und bewegt sich mit der Animation mit – auch beim Ducken, Rennen und Springen. Die Ausrüstung der gewählten Klasse (Helm, Weste, Rucksack …) gehört dazu. Jede Box gehört zu einer Zone: **Kopf**, **Rumpf**, **Arm** oder **Bein**. Technik: siehe `docs/architecture.md`, Abschnitt Trefferzonen.
 
+Schadensfaktor je Zone (seit M5, `data/combat.json`): **Kopf ×2, Rumpf ×1, Arme ×0,67, Beine ×0,67**, wie im Original: Mit dem Gewehr (25 Schaden) braucht man 4 Rumpftreffer, 2 Kopfschüsse oder 6 Treffer an Armen und Beinen. Die Waffe in der Hand ist keine Trefferzone.
+
 Noch offen:
-- Schadensfaktor je Zone (z. B. Kopf ×2, Beine ×0,75)?
 - Zählen dünne Ausrüstungsteile (z. B. die Funkantenne des Recon) als Treffer?
 - Hat jede Klasse ein Werkzeug zum Abbauen (z. B. Spaten) und Blöcke zum Bauen?
 - Begrenzter Block-Vorrat pro Spieler?
+
+### Waffen (Stand M5, für alle Spieler gleich)
+
+Bis die Klassen kommen (M8), hat jeder dieselben Waffen. Alle Werte stehen in `data/weapons.json`.
+
+| Platz | Waffe | Werte |
+|---|---|---|
+| 1 | Spaten | abbauen und bauen |
+| 2 | Sturmgewehr | Hitscan, 25 Schaden, 10 Schuss/s Dauerfeuer, 30 Schuss im Magazin, 120 Reserve, 2 s Nachladen, 15 Schaden an Blöcken |
+| 3 | Granate | 3 Stück, geworfen, prallt ab, explodiert nach 3 s; bis 120 Schaden im Umkreis von 4,5 Blöcken, sprengt Blöcke im Umkreis von 2,5 |
+| 4 | Raketenwerfer | 1 Rakete im Rohr, 5 Reserve, 1,5 s Nachladen; fliegt gerade, explodiert beim Aufprall: bis 120 Schaden im Umkreis von 4 Blöcken, sprengt Blöcke im Umkreis von 3 |
+
+Explosionsschaden nimmt zum Rand hin ab, Deckung hinter Blöcken schützt. Nach einem Waffenwechsel ist die Waffe 0,3 s nicht bereit. Leere Magazine laden von selbst nach.
 
 ## 4. Welt & Blöcke
 

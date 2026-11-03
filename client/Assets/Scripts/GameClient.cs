@@ -2,14 +2,17 @@ using System;
 using System.Collections;
 using System.IO;
 using AoS2.Client.Account;
+using AoS2.Client.Effects;
 using AoS2.Client.Player;
 using AoS2.Client.World;
 using AoS2.Net;
 using AoS2.Shared;
+using AoS2.Shared.Combat;
 using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Net;
 using AoS2.Shared.Net.Client;
+using AoS2.Shared.Rig;
 using AoS2.Shared.Voxels;
 using UnityEngine;
 
@@ -42,11 +45,14 @@ namespace AoS2.Client
     {
         [SerializeField] private Shader voxelShader;
         [SerializeField] private Shader lineShader;
+        [SerializeField] private Shader modelShader;
         [SerializeField] private string mapName = "testmap";
 
         private BlockTextures _textures;
         private Material _voxelMaterial;
         private Material _lineMaterial;
+        private Material _playerMaterial;
+        private Texture2D _playerTexture;
         private VoxelMeshBuilder _builder;
         private FallingBlocks _offlineFalling;
         private float _accumulator;
@@ -61,6 +67,15 @@ namespace AoS2.Client
 
         public BlockRegistry Registry { get; private set; }
         public MovementSettings Movement { get; private set; }
+
+        /// <summary>Kampfregeln und Waffen (data/combat.json, data/weapons.json).</summary>
+        public CombatSettings Combat { get; private set; }
+
+        /// <summary>Spielermodell: Knochen, Würfel, Animationen (data/player_rig.json).</summary>
+        public PlayerRig Rig { get; private set; }
+
+        /// <summary>Material für Waffen, Geschosse und Effekte (einfarbig, Farbe je Objekt).</summary>
+        public Material EffectMaterial { get; private set; }
         public VoxelWorld World { get; private set; }
         public MapMetadata Metadata { get; private set; }
 
@@ -71,6 +86,11 @@ namespace AoS2.Client
         public FallingBlocksView FallingView { get; private set; }
         public RemotePlayersView RemotePlayers { get; private set; }
         public LocalPlayer Player { get; private set; }
+        public CombatEffects Effects { get; private set; }
+        public BlockCracksView Cracks { get; private set; }
+
+        /// <summary>Was im Kampf passiert ist, für das HUD: Kills, Treffer, eigener Tod.</summary>
+        public CombatFeed Feed { get; } = new CombatFeed();
 
         /// <summary>Netzspiel (nur online, sonst <c>null</c>).</summary>
         public ClientSession Session { get; private set; }
@@ -118,14 +138,35 @@ namespace AoS2.Client
         private void LoadData()
         {
             Registry = BlockRegistry.Parse(File.ReadAllText(GameDataPaths.DataFile("blocks.json")));
-            Movement = MovementSettings.Parse(
-                File.ReadAllText(GameDataPaths.DataFile("movement.json")),
-                File.ReadAllText(GameDataPaths.DataFile("player_rig.json")));
+            var rigJson = File.ReadAllText(GameDataPaths.DataFile("player_rig.json"));
+            Movement = MovementSettings.Parse(File.ReadAllText(GameDataPaths.DataFile("movement.json")), rigJson);
+            Combat = CombatSettings.Parse(File.ReadAllText(GameDataPaths.DataFile("combat.json")), File.ReadAllText(GameDataPaths.DataFile("weapons.json")), Movement.TickRate);
+            Rig = PlayerRig.Parse(rigJson);
+            if (Rig.Fps != Movement.TickRate) throw new FormatException($"player_rig.json ist mit {Rig.Fps} Bildern/s abgetastet, das Spiel rechnet mit {Movement.TickRate} Ticks/s.");
             _textures = BlockTextures.Load(Registry, GameDataPaths.BlockTexturesFolder);
             _voxelMaterial = new Material(voxelShader) { name = "Voxel" };
             _voxelMaterial.SetTexture("_BlockTextures", _textures.Array);
             _lineMaterial = new Material(lineShader) { name = "Blockrahmen" };
             _builder = new VoxelMeshBuilder(_textures.FaceTable);
+
+            _playerTexture = LoadModelTexture(Path.Combine(GameDataPaths.ModelsFolder, "player", "player_blue.png"));
+            _playerMaterial = new Material(modelShader) { name = "Spieler" };
+            _playerMaterial.SetTexture("_BaseMap", _playerTexture);
+            EffectMaterial = new Material(modelShader) { name = "Effekte" };
+        }
+
+        /// <summary>PNG eines Modells mit Punktfilter (Pixel bleiben scharf); fehlt es, bleibt das Modell weiß.</summary>
+        private static Texture2D LoadModelTexture(string path)
+        {
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = Path.GetFileName(path) };
+            if (!File.Exists(path) || !texture.LoadImage(File.ReadAllBytes(path)))
+            {
+                Debug.LogError($"[AoS2] Modelltextur fehlt: {path}");
+                texture.SetPixels32(new[] { new Color32(255, 255, 255, 255), new Color32(255, 255, 255, 255), new Color32(255, 255, 255, 255), new Color32(255, 255, 255, 255) });
+                texture.Apply();
+            }
+            texture.filterMode = FilterMode.Point;
+            return texture;
         }
 
         // ---- Offline ----
@@ -195,8 +236,10 @@ namespace AoS2.Client
 
             Status = $"Verbinde mit {address} …";
             Net = new NetClient();
-            Session = new ClientSession(Registry, Movement, ReadMapFile, Net, () => Time.realtimeSinceStartupAsDouble);
+            Session = new ClientSession(Registry, Movement, ReadMapFile, Net, () => Time.realtimeSinceStartupAsDouble, Combat);
             Session.EditRejected += result => Player?.ShowEditResult(result);
+            Session.CombatEvent += OnCombatEvent;
+            Feed.Clear();
             Net.Session = Session;
             Net.Connect(address, ticket);
         }
@@ -267,6 +310,8 @@ namespace AoS2.Client
                 Player.ApplyNetworkCorrection(Session.TakeCorrection());
                 FallingView.UpdateVisuals(1); // die Session hat die Fallhöhe schon interpoliert
                 RemotePlayers.Sync(Session);
+                Effects.SyncProjectiles(Session.Projectiles);
+                Cracks.Sync(Session.BlockDamage);
             }
             else
             {
@@ -307,10 +352,14 @@ namespace AoS2.Client
             WorldRenderer.Initialize(World, _builder, _voxelMaterial);
             FallingView = new GameObject("Fallende Blöcke").AddComponent<FallingBlocksView>();
             FallingView.Initialize(Falling, _builder, _voxelMaterial);
+            Effects = new GameObject("Effekte").AddComponent<CombatEffects>();
+            Effects.Initialize(EffectMaterial, _textures, Combat);
             if (Mode == GameMode.Online)
             {
                 RemotePlayers = new GameObject("Andere Spieler").AddComponent<RemotePlayersView>();
-                RemotePlayers.Initialize(Registry, Movement, _builder, _voxelMaterial);
+                RemotePlayers.Initialize(Rig, _playerMaterial, EffectMaterial);
+                Cracks = new GameObject("Risse").AddComponent<BlockCracksView>();
+                Cracks.Initialize(modelShader);
             }
 
             var camera = Camera.main;
@@ -331,6 +380,10 @@ namespace AoS2.Client
             if (WorldRenderer != null) Destroy(WorldRenderer.gameObject);
             if (FallingView != null) Destroy(FallingView.gameObject);
             if (RemotePlayers != null) Destroy(RemotePlayers.gameObject);
+            if (Effects != null) Destroy(Effects.gameObject);
+            if (Cracks != null) Destroy(Cracks.gameObject);
+            Effects = null;
+            Cracks = null;
             Player = null;
             WorldRenderer = null;
             FallingView = null;
@@ -344,7 +397,83 @@ namespace AoS2.Client
             _textures?.Dispose();
             if (_voxelMaterial != null) Destroy(_voxelMaterial);
             if (_lineMaterial != null) Destroy(_lineMaterial);
+            if (_playerMaterial != null) Destroy(_playerMaterial);
+            if (EffectMaterial != null) Destroy(EffectMaterial);
+            if (_playerTexture != null) Destroy(_playerTexture);
         }
+
+        // ---- Kampf: Ereignisse vom Server in Anzeige und Effekte übersetzen ----
+
+        private void OnCombatEvent(WorldEvent e)
+        {
+            var me = Session.PlayerId;
+            switch (e.Type)
+            {
+                case WorldEventType.PlayerDamaged:
+                    RemotePlayers?.Flash(e.PlayerId);
+                    Feed.OnDamaged(e, me, PositionOf(e.Attacker));
+                    break;
+                case WorldEventType.PlayerKilled:
+                    Feed.OnKilled(e, me, NameOf(e.PlayerId), NameOf(e.Attacker), WeaponName(e.Weapon));
+                    if (e.PlayerId != me && Effects != null && Session.RemotePlayers.TryGetValue(e.PlayerId, out var victim))
+                    {
+                        var p = victim.Current.Position;
+                        Effects.Shatter(new Vector3(p.X, p.Y, p.Z), new Color(0.2f, 0.35f, 0.75f), new Color(0.25f, 0.27f, 0.3f));
+                    }
+                    break;
+                case WorldEventType.ShotFired:
+                    if (Effects == null) break;
+                    var from = ToUnity(e.Position);
+                    var to = ToUnity(e.Vector);
+                    var muzzle = RemotePlayers?.Model(e.PlayerId)?.Muzzle ?? from;
+                    var dir = (to - from).normalized;
+                    Effects.MuzzleFlash(muzzle, dir);
+                    Effects.Tracer(muzzle, to);
+                    if (e.Hit == ShotHit.Block)
+                    {
+                        var inside = to + dir * 0.02f;
+                        Effects.BlockImpact(to, -dir, World.GetBlock(Mathf.FloorToInt(inside.x), Mathf.FloorToInt(inside.y), Mathf.FloorToInt(inside.z)));
+                    }
+                    else if (e.Hit == ShotHit.Player) Effects.PlayerImpact(to, dir);
+                    break;
+                case WorldEventType.ProjectileSpawned:
+                    if (e.PlayerId != me && Effects != null && RemotePlayers?.Model(e.PlayerId) is { } shooter)
+                        Effects.MuzzleFlash(shooter.Muzzle, ToUnity(e.Vector).normalized);
+                    break;
+                case WorldEventType.ProjectileExploded:
+                    Effects?.Explosion(ToUnity(e.Position), Combat.Weapon(e.Weapon)?.Explosion?.Radius ?? 3, GroundColor);
+                    break;
+            }
+        }
+
+        /// <summary>Farbe des Blocks an oder unter einem Punkt (für Bruchstücke einer Explosion).</summary>
+        private Color GroundColor(Vector3 point)
+        {
+            int x = Mathf.FloorToInt(point.x), y = Mathf.FloorToInt(point.y), z = Mathf.FloorToInt(point.z);
+            for (var dy = 0; dy < 3; dy++)
+            {
+                var id = World.GetBlock(x, y - dy, z);
+                if (id != BlockRegistry.Air) return _textures.AverageColor(id);
+            }
+            return new Color(0.45f, 0.4f, 0.35f);
+        }
+
+        public string NameOf(byte id)
+        {
+            if (Session == null) return "?";
+            if (id == Session.PlayerId) return Session.PlayerName;
+            return Session.RemotePlayers.TryGetValue(id, out var p) ? p.Name : "?";
+        }
+
+        public string WeaponName(byte slot) => Combat.Weapon(slot)?.DisplayName ?? "Spaten";
+
+        private Vector3? PositionOf(byte id)
+        {
+            if (Session != null && Session.RemotePlayers.TryGetValue(id, out var p) && p.HasState) return ToUnity(p.Current.Position);
+            return null;
+        }
+
+        private static Vector3 ToUnity(Vec3 v) => new Vector3(v.X, v.Y, v.Z);
 
         private void OnApplicationQuit() => Net?.Disconnect();
 

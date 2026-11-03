@@ -47,6 +47,11 @@ namespace AoS2.Editor
                         count++;
                     }
 
+            // Teamtexturen des Spielermodells (das Modell selbst steht in data/player_rig.json)
+            var models = Recreate(Path.Combine(target, "models", "player"));
+            foreach (var file in Directory.GetFiles(Path.Combine(root, "assets-src", "models", "player"), "player_*.png"))
+                if (!file.EndsWith("_mask.png")) File.Copy(file, Path.Combine(models, Path.GetFileName(file)));
+
             AssetDatabase.Refresh();
             Debug.Log($"[AoS2] Spieldaten nach {target} kopiert ({count} Blocktexturen).");
         }

@@ -21,6 +21,20 @@ const STANCES = {
 
 // ---------- Modell einlesen ----------
 
+// Texturkoordinaten je Seite in Pixeln der Textur ([u0, v0, u1, v1], v nach unten), null = Seite ohne Textur.
+// Der Client baut daraus das sichtbare Modell; gedrehte Texturen auf Seiten werden nicht unterstützt.
+const FACES = ['north', 'east', 'south', 'west', 'up', 'down'];
+function faceUvs(e) {
+  const out = {};
+  for (const f of FACES) {
+    const face = e.faces?.[f];
+    if (!face || face.texture === null || face.texture === undefined) { out[f] = null; continue; }
+    if (face.rotation) throw new Error(`Würfel ${e.name}: gedrehte Textur auf Seite ${f} wird nicht unterstützt`);
+    out[f] = face.uv.slice();
+  }
+  return out;
+}
+
 function loadModel(path) {
   const m = JSON.parse(readFileSync(path, 'utf8'));
   const groupsById = new Map((m.groups || []).map(g => [g.uuid, g]));
@@ -47,6 +61,7 @@ function loadModel(path) {
           from: e.from.map(v => v - inf),
           to: e.to.map(v => v + inf),
           gear: gear ?? null,
+          uv: faceUvs(e),
         });
       } else {
         walk(child, { name }, gear);
@@ -88,7 +103,7 @@ function loadModel(path) {
     return { name: a.name, length: a.length, loop: a.loop, tracks };
   });
 
-  return { bones, boxes, animations };
+  return { bones, boxes, animations, textureSize: [m.resolution?.width ?? 16, m.resolution?.height ?? 16] };
 }
 
 // ---------- Interpolation wie in Blockbench ----------
@@ -253,7 +268,8 @@ const out = {
   sampling: { fps: FPS, between_frames: 'linear' },
   classes,
   bones: rig.bones.map(({ name, parent, pivot, rotation }) => ({ name, parent, pivot, rotation })),
-  hitboxes: rig.boxes.map(b => ({ name: b.name, bone: b.bone, zone: b.zone, gear: b.gear, from: b.from.map(round), to: b.to.map(round) })),
+  texture_size: rig.textureSize,
+  hitboxes: rig.boxes.map(b => ({ name: b.name, bone: b.bone, zone: b.zone, gear: b.gear, from: b.from.map(round), to: b.to.map(round), uv: b.uv })),
   stances,
   animations: rig.animations.map(a => {
     const frames = Math.round(a.length * FPS) + 1;

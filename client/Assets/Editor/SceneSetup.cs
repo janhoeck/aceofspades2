@@ -7,7 +7,7 @@ using UnityEngine;
 namespace AoS2.Editor
 {
     /// <summary>
-    /// Richtet die Spielszene ein: ein GameObject „GameClient“ mit den Shadern der Blockwelt.
+    /// Richtet die Spielszene ein: ein GameObject „GameClient“ mit den Shadern der Blockwelt und der Modelle.
     /// Kann beliebig oft laufen. Aufruf im Batchmode:
     /// <code>Unity.exe -batchmode -quit -projectPath client -executeMethod AoS2.Editor.SceneSetup.Run</code>
     /// </summary>
@@ -33,6 +33,7 @@ namespace AoS2.Editor
             var serialized = new SerializedObject(game);
             serialized.FindProperty("voxelShader").objectReferenceValue = Shader.Find("AoS2/Voxel");
             serialized.FindProperty("lineShader").objectReferenceValue = Shader.Find("AoS2/Unlit Color");
+            serialized.FindProperty("modelShader").objectReferenceValue = Shader.Find("AoS2/Model");
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
             EditorSceneManager.MarkSceneDirty(scene);

@@ -1,3 +1,4 @@
+using AoS2.Shared.Combat;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Voxels;
 
@@ -13,6 +14,8 @@ namespace AoS2.Shared.Net.Client
     ///       gerechnet. Stimmt alles, kommt genau dieselbe Position heraus (der Code ist deterministisch);
     ///       hat sich etwas geändert (z. B. hat ein anderer Spieler einen Block gebaut), korrigiert sich der Client so.</item>
     /// </list>
+    /// Die Waffen (Munition, Feuerpause, Nachladen, <see cref="WeaponSim"/>) laufen genauso mit: Der Client zeigt Schüsse
+    /// sofort, der Server rechnet dieselben Eingaben und bestätigt oder korrigiert.
     /// </summary>
     public sealed class ClientPrediction
     {
@@ -21,19 +24,27 @@ namespace AoS2.Shared.Net.Client
 
         private readonly PlayerInput[] _inputs = new PlayerInput[HistorySize];
         private readonly PlayerState[] _states = new PlayerState[HistorySize];
+        private readonly WeaponState[] _weapons = new WeaponState[HistorySize];
         private readonly VoxelWorld _world;
         private readonly MovementSettings _settings;
+        private readonly CombatSettings _combat;
 
-        public ClientPrediction(VoxelWorld world, MovementSettings settings, PlayerState start)
+        /// <param name="combat">Waffenwerte; <c>null</c> = ohne Waffen (nur Bewegung).</param>
+        public ClientPrediction(VoxelWorld world, MovementSettings settings, PlayerState start, CombatSettings combat = null)
         {
             _world = world;
             _settings = settings;
+            _combat = combat;
             State = start;
             _states[0] = start;
+            if (combat != null) Weapons = _weapons[0] = WeaponState.Full(combat);
         }
 
         /// <summary>Vorhergesagter Zustand nach der Eingabe <see cref="Tick"/>.</summary>
         public PlayerState State { get; private set; }
+
+        /// <summary>Vorhergesagte Waffen nach der Eingabe <see cref="Tick"/>.</summary>
+        public WeaponState Weapons { get; private set; }
 
         /// <summary>Nummer der letzten gerechneten Eingabe (die erste ist 1).</summary>
         public uint Tick { get; private set; }
@@ -46,13 +57,26 @@ namespace AoS2.Shared.Net.Client
 
         public uint UnackedCount => Tick - AckedTick;
 
-        public PlayerState Step(PlayerInput input)
+        public PlayerState Step(PlayerInput input) => Step(input, out _);
+
+        /// <summary>Ein Tick: Bewegung, dann Waffen. <paramref name="firedSlot"/> = Platz der Waffe, die jetzt feuert (sonst 0).</summary>
+        public PlayerState Step(PlayerInput input, out int firedSlot)
         {
             Tick++;
-            State = PlayerMovement.Step(State, input, _world, _settings);
+            var weapons = Weapons;
+            State = Simulate(State, ref weapons, input, out firedSlot);
+            Weapons = weapons;
             _inputs[Tick % HistorySize] = input;
             _states[Tick % HistorySize] = State;
+            _weapons[Tick % HistorySize] = Weapons;
             return State;
+        }
+
+        private PlayerState Simulate(PlayerState state, ref WeaponState weapons, PlayerInput input, out int firedSlot)
+        {
+            state = PlayerMovement.Step(state, input, _world, _settings);
+            firedSlot = _combat != null ? WeaponSim.Step(ref weapons, input, _combat) : 0;
+            return state;
         }
 
         /// <summary>Eingabe eines Ticks, solange er noch im Verlauf steht.</summary>
@@ -64,36 +88,46 @@ namespace AoS2.Shared.Net.Client
             return true;
         }
 
+        public Vec3 Reconcile(uint ackTick, PlayerState server) => Reconcile(ackTick, server, Weapons);
+
         /// <summary>
         /// Übernimmt den Zustand des Servers nach Eingabe <paramref name="ackTick"/> und rechnet die neueren Eingaben neu.
         /// Liefert, um wie viel sich die aktuelle Position dadurch verschoben hat (für eine weiche Korrektur der Anzeige).
         /// </summary>
-        public Vec3 Reconcile(uint ackTick, PlayerState server)
+        public Vec3 Reconcile(uint ackTick, PlayerState server, WeaponState serverWeapons)
         {
             if (ackTick < AckedTick || ackTick > Tick) return Vec3.Zero; // veraltet oder unmöglich
             var before = State;
+            if (_combat == null) serverWeapons = default;
 
             if (Tick - ackTick >= HistorySize)
             {
                 // So weit zurück reicht der Verlauf nicht: einfach den Server-Zustand übernehmen.
                 AckedTick = ackTick;
                 State = server;
+                Weapons = serverWeapons;
                 _states[Tick % HistorySize] = server;
+                _weapons[Tick % HistorySize] = serverWeapons;
                 Mispredictions++;
                 return State.Position - before.Position;
             }
 
-            if (ackTick > AckedTick && !SameState(_states[ackTick % HistorySize], server)) Mispredictions++;
+            if (ackTick > AckedTick && (!SameState(_states[ackTick % HistorySize], server) || !_weapons[ackTick % HistorySize].Equals(serverWeapons)))
+                Mispredictions++;
             AckedTick = ackTick;
 
             var s = server;
+            var w = serverWeapons;
             _states[ackTick % HistorySize] = s;
+            _weapons[ackTick % HistorySize] = w;
             for (var t = ackTick + 1; t <= Tick; t++)
             {
-                s = PlayerMovement.Step(s, _inputs[t % HistorySize], _world, _settings);
+                s = Simulate(s, ref w, _inputs[t % HistorySize], out _);
                 _states[t % HistorySize] = s;
+                _weapons[t % HistorySize] = w;
             }
             State = s;
+            Weapons = w;
             return State.Position - before.Position;
         }
 

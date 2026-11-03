@@ -18,6 +18,9 @@ namespace AoS2.Shared.Voxels
 
         /// <summary>Server: Vom Auge aus trifft der Blick nicht genau diesen Block (verdeckt oder geschummelt).</summary>
         NoLineOfSight,
+
+        /// <summary>Server: Tote können weder abbauen noch bauen.</summary>
+        Dead,
     }
 
     /// <summary>

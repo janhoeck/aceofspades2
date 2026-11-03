@@ -83,7 +83,8 @@ Blöcke ohne Transparenz zuerst. Transparente Blöcke (Glas, Blätter) kommen sp
 | Teamfarben | Teamfarbe über eine Masken-Textur, damit ein Modell für beide Teams reicht |
 | Export | glTF oder FBX |
 | Team-Texturen | `node assets-src/tools/bake-team-textures.mjs <basis.png> <maske.png>` erzeugt `_blue`/`_green` |
-| Skelett, Trefferzonen, Animationen | `node assets-src/tools/export-rig.mjs <modell.bbmodel> data/<name>_rig.json` – nach **jeder** Änderung an Modell oder Animation ausführen |
+| Skelett, Trefferzonen, Animationen | `node assets-src/tools/export-rig.mjs <modell.bbmodel> data/<name>_rig.json` – nach **jeder** Änderung an Modell oder Animation ausführen. Die Datei enthält auch die Texturkoordinaten jeder Würfelseite: Das Spiel baut das sichtbare Spielermodell daraus (kein glTF/FBX-Import für den Spieler) |
+| Spielertextur im Spiel | `assets-src/models/player/player_blue.png` (im Editor direkt, im Build nach `StreamingAssets/models` kopiert); Grün kommt mit den Teams in M6 |
 | Regeln fürs Modell | keine gedrehten Würfel (Drehung nur über Gruppen/Knochen), Ausrüstung in Gruppen `gear_<klasse>_<teil>` |
 
 ### Audio
@@ -253,8 +254,9 @@ Zusätzlich:
 - **M1–M2:** nur Launcher-Grafiken und App-Icon.
 - **M3–M5:**
   - Einfarbige 16 × 16-Texturen mit Rauschen.
-  - Spieler als Würfel-Figur, Waffen als einfache Quader.
-  - Sounds per jsfxr.
+  - Spieler: das Blockbench-Modell aus `assets-src/models/player` (blaue Textur für alle). Waffen in der Hand und in der Ich-Perspektive als einfache Quader im Code (`WeaponMeshes`, `WeaponView`); die Blockbench-Waffen in `assets-src/models/weapons` haben gedrehte Würfel und Texturen, für sie fehlt noch ein Export.
+  - Effekte (Mündungsfeuer, Leuchtspur, Einschlag, Explosion, Zerfall beim Tod) aus leuchtenden Würfeln im Code (`CombatEffects`), Risse in Blöcken als im Code erzeugte 16 × 16-Muster (`BlockCracksView`).
+  - Sounds: noch keine.
 - **Ab M6:** Platzhalter schrittweise durch P1-Assets ersetzen, beginnend mit allem, was das Spielgefühl am stärksten prägt: Waffensounds, Explosion, Blocktexturen, Spielermodell.
 
 So blockiert die Asset-Produktion nie die Programmierung, und beides kann parallel laufen.

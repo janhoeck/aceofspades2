@@ -1,5 +1,7 @@
+using AoS2.Shared.Combat;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Net;
+using AoS2.Shared.Rig;
 
 namespace AoS2.Server;
 
@@ -12,8 +14,14 @@ public sealed class ServerPlayer
     /// <summary>So viele verarbeitete Ticks merkt sich der Server (Zustand + Eingabe), um Blockaktionen nachträglich zu prüfen.</summary>
     internal const int HistorySize = 64;
 
+    /// <summary>So viele Server-Ticks (gut 1 s) reicht der Verlauf für den Lag-Ausgleich zurück.</summary>
+    internal const int ViewHistorySize = 80;
+
     private readonly PlayerState[] _historyStates = new PlayerState[HistorySize];
     private readonly PlayerInput[] _historyInputs = new PlayerInput[HistorySize];
+    private readonly PlayerSnapshot[] _views = new PlayerSnapshot[ViewHistorySize];
+    private readonly uint[] _viewTicks = new uint[ViewHistorySize];
+    private readonly bool[] _viewValid = new bool[ViewHistorySize];
 
     internal ServerPlayer(byte id, Guid accountId, string name, PlayerState spawn)
     {
@@ -53,6 +61,31 @@ public sealed class ServerPlayer
     /// <summary>Eingaben, die verworfen wurden (zu viele auf einmal); für Tests und Statistik.</summary>
     public int DroppedInputs { get; internal set; }
 
+    // ---- Kampf ----
+
+    /// <summary>Lebenspunkte (0 = tot).</summary>
+    public int Health { get; internal set; }
+
+    public bool Alive => Health > 0;
+
+    /// <summary>Tot: Server-Tick, zu dem der Spieler wieder erscheint.</summary>
+    public uint RespawnAt { get; internal set; }
+
+    /// <summary>Zählt die Leben (+1 bei jedem Respawn).</summary>
+    public byte Life { get; internal set; }
+
+    public int Kills { get; internal set; }
+    public int Deaths { get; internal set; }
+
+    /// <summary>Waffen und Munition, Tick für Tick aus den Eingaben gerechnet wie auf dem Client.</summary>
+    internal WeaponState WeaponsState;
+
+    public WeaponState Weapons => WeaponsState;
+
+    internal AnimationState AnimationState;
+
+    public AnimationState Animation => AnimationState;
+
     internal void Remember(uint tick, PlayerState state, PlayerInput input)
     {
         _historyStates[tick % HistorySize] = state;
@@ -68,6 +101,22 @@ public sealed class ServerPlayer
         state = _historyStates[tick % HistorySize];
         input = _historyInputs[tick % HistorySize];
         return true;
+    }
+
+    /// <summary>So, wie andere Clients den Spieler am Ende von Server-Tick <paramref name="tick"/> sehen (für den Lag-Ausgleich).</summary>
+    internal void RecordView(uint tick, PlayerSnapshot view)
+    {
+        var i = tick % ViewHistorySize;
+        _views[i] = view.Quantized();
+        _viewTicks[i] = tick;
+        _viewValid[i] = true;
+    }
+
+    internal bool TryGetView(uint tick, out PlayerSnapshot view)
+    {
+        var i = tick % ViewHistorySize;
+        view = _views[i];
+        return _viewValid[i] && _viewTicks[i] == tick;
     }
 }
 

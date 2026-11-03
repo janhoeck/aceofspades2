@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using AoS2.Shared.Combat;
 using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Voxels;
@@ -63,15 +64,19 @@ namespace AoS2.Shared.Net.Client
         private readonly InputPacket _inputPacket = new InputPacket();
         private readonly Dictionary<byte, RemotePlayer> _players = new Dictionary<byte, RemotePlayer>();
         private readonly List<WorldEvent> _events = new List<WorldEvent>();
+        private readonly Dictionary<BlockPos, byte> _blockDamage = new Dictionary<BlockPos, byte>();
         private ushort _editSeq;
         private Vec3 _correction;
 
         /// <param name="readMapFile">Liefert die Bytes von <c>maps/&lt;name&gt;.aos2map</c> oder <c>null</c>, wenn es sie nicht gibt.</param>
         /// <param name="clock">Lokale Zeit in Sekunden (Unity: <c>Time.realtimeSinceStartupAsDouble</c>).</param>
-        public ClientSession(BlockRegistry registry, MovementSettings movement, Func<string, byte[]> readMapFile, IMessageSender sender, Func<double> clock)
+        /// <param name="combat">Kampfregeln und Waffen; <c>null</c> = ohne Waffen.</param>
+        public ClientSession(BlockRegistry registry, MovementSettings movement, Func<string, byte[]> readMapFile, IMessageSender sender, Func<double> clock,
+            CombatSettings combat = null)
         {
             Registry = registry;
             Movement = movement;
+            Combat = combat;
             _readMapFile = readMapFile;
             _sender = sender;
             _clock = clock;
@@ -79,6 +84,7 @@ namespace AoS2.Shared.Net.Client
 
         public BlockRegistry Registry { get; }
         public MovementSettings Movement { get; }
+        public CombatSettings Combat { get; }
 
         public ClientPhase Phase { get; private set; } = ClientPhase.Connecting;
 
@@ -94,6 +100,24 @@ namespace AoS2.Shared.Net.Client
         public PredictedBlocks Blocks { get; private set; }
         public NetFallingGroups Falling { get; private set; }
         public ServerClock Clock { get; private set; }
+        public NetProjectiles Projectiles { get; private set; }
+
+        /// <summary>Eigene Lebenspunkte laut Server (0 = tot).</summary>
+        public int Health { get; private set; }
+
+        public bool Alive => Health > 0;
+
+        /// <summary>Tot: Ticks bis zum Respawn (aus dem letzten Snapshot).</summary>
+        public int RespawnTicks { get; private set; }
+
+        /// <summary>Zählt die eigenen Leben (+1 bei jedem Respawn).</summary>
+        public int Life { get; private set; }
+
+        /// <summary>Schaden je beschädigtem Block (1 … 255), für die Risse.</summary>
+        public IReadOnlyDictionary<BlockPos, byte> BlockDamage => _blockDamage;
+
+        /// <summary>Kampf-Ereignisse für Anzeige und Effekte: Schaden, Kill, Schüsse anderer, Geschosse, Blockschaden.</summary>
+        public event Action<WorldEvent> CombatEvent;
 
         public IReadOnlyDictionary<byte, RemotePlayer> RemotePlayers => _players;
 
@@ -198,7 +222,10 @@ namespace AoS2.Shared.Net.Client
             Metadata = map.Metadata;
             Blocks = new PredictedBlocks(World);
             Falling = new NetFallingGroups(Blocks);
-            Prediction = new ClientPrediction(World, Movement, welcome.Spawn);
+            Prediction = new ClientPrediction(World, Movement, welcome.Spawn, Combat);
+            Projectiles = new NetProjectiles(World, Combat, Movement.DeltaTime);
+            Health = Combat?.Health ?? 100;
+            World.BlockChanged += (x, y, z, _, __) => _blockDamage.Remove(new BlockPos(x, y, z));
             Clock = new ServerClock(welcome.TickRate);
             LastSnapshotTick = welcome.ServerTick;
             Phase = ClientPhase.Syncing;
@@ -211,8 +238,11 @@ namespace AoS2.Shared.Net.Client
             SnapshotsReceived++;
             Clock.OnSnapshot(s.ServerTick, _clock());
 
-            var c = Prediction.Reconcile(s.AckInputTick, s.Own);
+            var c = Prediction.Reconcile(s.AckInputTick, s.Own, s.OwnWeapons);
             _correction = _correction + c;
+            Health = s.OwnHealth;
+            RespawnTicks = s.OwnRespawnTicks;
+            Life = s.OwnLife;
 
             foreach (var p in s.Players)
                 if (_players.TryGetValue(p.Id, out var remote))
@@ -246,26 +276,63 @@ namespace AoS2.Shared.Net.Client
                 case WorldEventType.SyncComplete:
                     if (Phase == ClientPhase.Syncing) Phase = ClientPhase.Playing;
                     break;
+                case WorldEventType.BlockDamaged:
+                    if (e.Level == 0) _blockDamage.Remove(new BlockPos(e.X, e.Y, e.Z));
+                    else _blockDamage[new BlockPos(e.X, e.Y, e.Z)] = e.Level;
+                    CombatEvent?.Invoke(e);
+                    break;
+                case WorldEventType.PlayerDamaged:
+                    if (e.PlayerId == PlayerId) Health = e.Health;
+                    CombatEvent?.Invoke(e);
+                    break;
+                case WorldEventType.PlayerKilled:
+                    if (e.PlayerId == PlayerId)
+                    {
+                        Health = 0;
+                        RespawnTicks = Combat?.RespawnTicks ?? 0;
+                    }
+                    CombatEvent?.Invoke(e);
+                    break;
+                case WorldEventType.ShotFired:
+                    CombatEvent?.Invoke(e);
+                    break;
+                case WorldEventType.ProjectileSpawned:
+                    Projectiles.Spawn(e.ProjectileId, e.Weapon, e.PlayerId, e.Tick, e.Position, e.Vector);
+                    CombatEvent?.Invoke(e);
+                    break;
+                case WorldEventType.ProjectileExploded:
+                    Projectiles.Explode(e.ProjectileId);
+                    CombatEvent?.Invoke(e);
+                    break;
             }
         }
 
         // ---- Senden ----
 
-        /// <summary>Ein Simulationsschritt des eigenen Spielers: vorhersagen und die Eingabe an den Server schicken.</summary>
-        public void Tick(PlayerInput input)
+        /// <summary>
+        /// Ein Simulationsschritt des eigenen Spielers: vorhersagen und die Eingabe an den Server schicken.
+        /// Liefert den Platz der Waffe, die in diesem Tick feuert (0 = keine), damit die Anzeige Mündungsfeuer zeigen kann.
+        /// Beim Feuern geht der gerade gezeigte Zeitpunkt (<see cref="RenderTick"/>) mit: Gegen ihn prüft der Server den Treffer.
+        /// Tot zählen nur Blickrichtung und Waffenwahl (wie auf dem Server).
+        /// </summary>
+        public int Tick(PlayerInput input)
         {
-            if (Phase != ClientPhase.Playing) return;
-            Prediction.Step(input);
+            if (Phase != ClientPhase.Playing) return 0;
+            if (!Alive) input.Buttons = InputButtons.None;
+            if (input.Has(InputButtons.Fire)) input.ViewTick = RenderTick;
+            Prediction.Step(input, out var fired);
             Prediction.FillInputPacket(_inputPacket);
             _writer.Clear();
             _inputPacket.Write(_writer);
             _sender.Send(_writer, Delivery.Unreliable);
+            return fired;
         }
 
         /// <summary>Block abbauen: sofort zeigen, beim Server anfragen. Gehört zum zuletzt gerechneten Tick.</summary>
         public BlockEditResult RequestRemove(int x, int y, int z, float distance)
         {
             if (Phase != ClientPhase.Playing) return BlockEditResult.OutOfReach;
+            if (!Alive) return BlockEditResult.Dead;
             var result = BlockEditing.CanRemove(World, Registry, x, y, z, distance);
             if (result == BlockEditResult.Ok) SendEdit(BlockEditKind.Remove, x, y, z, BlockRegistry.Air);
             return result;
@@ -274,6 +341,7 @@ namespace AoS2.Shared.Net.Client
         public BlockEditResult RequestPlace(int x, int y, int z, byte id, float distance)
         {
             if (Phase != ClientPhase.Playing) return BlockEditResult.OutOfReach;
+            if (!Alive) return BlockEditResult.Dead;
             var result = BlockEditing.CanPlace(World, Registry, x, y, z, id, distance, Prediction.State, Movement);
             if (result == BlockEditResult.Ok) SendEdit(BlockEditKind.Place, x, y, z, id);
             return result;
@@ -304,23 +372,9 @@ namespace AoS2.Shared.Net.Client
                 p.HasState = true;
             }
             Falling.UpdateRender(serverTick);
+            Projectiles.UpdateRender(serverTick);
         }
 
-        private static readonly Func<PlayerSnapshot, PlayerSnapshot, float, PlayerSnapshot> LerpPlayer = (a, b, t) =>
-        {
-            var later = t >= 0.5f ? b : a;
-            var yawDelta = b.Yaw - a.Yaw;
-            if (yawDelta > 180f) yawDelta -= 360f;
-            else if (yawDelta < -180f) yawDelta += 360f;
-            return new PlayerSnapshot
-            {
-                Id = b.Id,
-                Position = a.Position + (b.Position - a.Position) * t,
-                Yaw = a.Yaw + yawDelta * t,
-                Pitch = a.Pitch + (b.Pitch - a.Pitch) * t,
-                Crouching = later.Crouching,
-                OnGround = later.OnGround,
-            };
-        };
+        private static readonly Func<PlayerSnapshot, PlayerSnapshot, float, PlayerSnapshot> LerpPlayer = PlayerSnapshot.Lerp;
     }
 }

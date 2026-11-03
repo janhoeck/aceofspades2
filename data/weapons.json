@@ -1,0 +1,25 @@
+{
+  "_comment": "Waffen (Zeiten in Sekunden, Längen in Blöcken, Geschwindigkeiten in Blöcken/s). Reihenfolge = Plätze 2, 3, 4 … (Platz 1 ist immer der Spaten). kind: hitscan (Strahl, sofort), grenade (geworfen, prallt ab, Zündzeit) oder rocket (fliegt gerade, explodiert beim Aufprall). damage: Grundschaden je Treffer, wird mit dem Faktor der Trefferzone aus combat.json multipliziert. blockDamage: Schaden an Blöcken je Treffer (Lebenspunkte der Blöcke in blocks.json). fireInterval: Zeit zwischen zwei Schüssen. automatic: gedrückt halten feuert weiter. magazine/reserve: Schuss im Magazin und in Reserve. reloadSeconds: 0 = kein Nachladen. explosion: radius/damage für Spieler (linear zum Rand hin weniger), blockRadius/blockDamage für Blöcke.",
+  "weapons": [
+    {
+      "name": "rifle", "displayName": "Sturmgewehr", "kind": "hitscan",
+      "damage": 25, "blockDamage": 15, "range": 200,
+      "fireInterval": 0.1, "automatic": true,
+      "magazine": 30, "reserve": 120, "reloadSeconds": 2.0
+    },
+    {
+      "name": "grenade", "displayName": "Granate", "kind": "grenade",
+      "fireInterval": 1.0, "automatic": false,
+      "magazine": 3, "reserve": 0, "reloadSeconds": 0,
+      "speed": 15, "gravity": 22, "bounce": 0.35, "friction": 0.6, "fuseSeconds": 3.0, "lifetimeSeconds": 3.0,
+      "explosion": { "radius": 4.5, "damage": 120, "blockRadius": 2.5, "blockDamage": 220 }
+    },
+    {
+      "name": "rocket", "displayName": "Raketenwerfer", "kind": "rocket",
+      "fireInterval": 0.8, "automatic": false,
+      "magazine": 1, "reserve": 5, "reloadSeconds": 1.5,
+      "speed": 35, "gravity": 0, "lifetimeSeconds": 5.0,
+      "explosion": { "radius": 4.0, "damage": 120, "blockRadius": 3.0, "blockDamage": 260 }
+    }
+  ]
+}

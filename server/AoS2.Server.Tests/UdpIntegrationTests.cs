@@ -111,6 +111,35 @@ public sealed class UdpIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void TwoClients_ShootUntilKill_AndRespawn_OverRealUdp()
+    {
+        _nextServerTick = Now;
+        var a = Connect("Anna", packetLoss: 5);
+        var b = Connect("Ben", packetLoss: 5);
+        Assert.True(Pump(() => a.Playing && b.Playing && a.Session.RemotePlayers.Count == 1));
+        var kills = new List<WorldEvent>();
+        b.Session.CombatEvent += e => { if (e.Type == WorldEventType.PlayerKilled) kills.Add(e); };
+
+        // Anna nimmt das Gewehr und hält auf Bens Rumpf, wie sie ihn sieht, bis er tot ist.
+        a.Input.Weapon = 1;
+        Assert.True(Pump(() =>
+        {
+            if (!a.Session.RemotePlayers.TryGetValue(b.Session.PlayerId, out var ben) || !ben.HasState) return false;
+            (a.Input.Yaw, a.Input.Pitch) = TestArena.Aim(a.Session.Prediction.State.Position, ben.Current.Position + new Vec3(0, 1, 0));
+            a.Input.Buttons = InputButtons.Fire;
+            return kills.Count > 0;
+        }, 5), $"Ben lebt noch mit {b.Session.Health}");
+        a.Input = default;
+        var kill = Assert.Single(kills);
+        Assert.Equal((b.Session.PlayerId, a.Session.PlayerId), (kill.PlayerId, kill.Attacker));
+        Assert.False(b.Session.Alive);
+        Assert.Equal(1, _server.Match.FindPlayer(a.Session.PlayerId)!.Kills);
+
+        Assert.True(Pump(() => b.Session.Alive, 6.5), "Respawn nach 5 s");
+        Assert.Equal(100, b.Session.Health);
+    }
+
+    [Fact]
     public void LateJoiner_GetsWorldChanges()
     {
         _nextServerTick = Now;
@@ -217,7 +246,7 @@ public sealed class UdpIntegrationTests : IDisposable
             Net = new NetClient();
             var content = TestArena.Content;
             Session = new ClientSession(content.Registry, content.Movement,
-                map => map == content.MapName ? content.MapFileBytes : null, Net, clock);
+                map => map == content.MapName ? content.MapFileBytes : null, Net, clock, content.Combat);
             Session.EditRejected += r => Rejected.Add(r);
             Net.Session = Session;
         }

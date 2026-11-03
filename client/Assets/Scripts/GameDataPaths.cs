@@ -21,6 +21,11 @@ namespace AoS2.Client
             ? Path.Combine(RepositoryRoot, "assets-src", "textures", "blocks")
             : Path.Combine(Application.streamingAssetsPath, "textures", "blocks");
 
+        /// <summary>Texturen der Modelle (Spieler): im Editor <c>assets-src/models</c>, im Build eine Kopie davon.</summary>
+        public static string ModelsFolder => Application.isEditor
+            ? Path.Combine(RepositoryRoot, "assets-src", "models")
+            : Path.Combine(Application.streamingAssetsPath, "models");
+
         public static string DataFile(string name) => Path.Combine(DataFolder, name);
     }
 }

@@ -16,11 +16,17 @@ namespace AoS2.Client.World
     {
         public const int TextureSize = 16;
 
-        private BlockTextures(Texture2DArray array, NativeArray<int> faceTable)
+        private readonly Color32[] _averageColors;
+
+        private BlockTextures(Texture2DArray array, NativeArray<int> faceTable, Color32[] averageColors)
         {
             Array = array;
             FaceTable = faceTable;
+            _averageColors = averageColors;
         }
+
+        /// <summary>Mittlere Farbe eines Blocktyps (Seitenfläche), z. B. für Bruchstücke beim Einschlag.</summary>
+        public Color32 AverageColor(byte id) => _averageColors[id];
 
         public Texture2DArray Array { get; }
 
@@ -57,11 +63,35 @@ namespace AoS2.Client.World
                 anisoLevel = 0,
             };
             var image = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            var layerColors = new Color32[layers.Count];
             for (var i = 0; i < layers.Count; i++)
-                array.SetPixels32(LoadPixels(image, Path.Combine(folder, layers[i] + ".png")), i, 0);
+            {
+                var pixels = LoadPixels(image, Path.Combine(folder, layers[i] + ".png"));
+                array.SetPixels32(pixels, i, 0);
+                layerColors[i] = Average(pixels);
+            }
+            var averageColors = new Color32[256];
+            foreach (var block in registry.All)
+            {
+                var first = table[block.Id * BlockFaces.Count + (int)BlockFace.PosX] & 0xFFFF;
+                averageColors[block.Id] = first < layerColors.Length ? layerColors[first] : new Color32(128, 128, 128, 255);
+            }
             UnityEngine.Object.Destroy(image);
             array.Apply(updateMipmaps: true, makeNoLongerReadable: true);
-            return new BlockTextures(array, table);
+            return new BlockTextures(array, table, averageColors);
+        }
+
+        private static Color32 Average(Color32[] pixels)
+        {
+            long r = 0, g = 0, b = 0;
+            foreach (var p in pixels)
+            {
+                r += p.r;
+                g += p.g;
+                b += p.b;
+            }
+            var n = Math.Max(1, pixels.Length);
+            return new Color32((byte)(r / n), (byte)(g / n), (byte)(b / n), 255);
         }
 
         private static Color32[] LoadPixels(Texture2D image, string path)

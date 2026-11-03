@@ -1,7 +1,9 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using AoS2.Net;
@@ -32,6 +34,7 @@ namespace AoS2.Client.Tests
         private NetClient _otherNet;
         private ClientSession _other;
         private double _otherNextTick;
+        private PlayerInput _otherInput;
 
         [UnitySetUp]
         public IEnumerator StartServerAndConnect()
@@ -136,13 +139,99 @@ namespace AoS2.Client.Tests
             Assert.IsFalse(_other.World.IsSolid(x, y, z));
         }
 
+        /// <summary>
+        /// M5: Der Unity-Spieler nimmt das Gewehr und hält auf den zweiten Client, so wie er ihn sieht, bis der Server ihn
+        /// für tot erklärt. Geprüft wird das ganze Paket: Vorhersage feuert, Server trifft (Lag-Ausgleich), Trefferanzeige und
+        /// Kill-Anzeige im Spiel, Spielermodell sichtbar, Respawn nach 5 s. Bilder: artifacts/screenshots/m5-*.png.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Online_ShootOtherPlayer_UntilKilled_ThenRespawn()
+        {
+            ConnectOtherClient();
+            var kills = new List<WorldEvent>();
+            _other.CombatEvent += e => { if (e.Type == WorldEventType.PlayerKilled) kills.Add(e); };
+            var timeout = Time.realtimeSinceStartup + 10f;
+            while ((_other.Phase != ClientPhase.Playing || _game.RemotePlayers.Count == 0) && Time.realtimeSinceStartup < timeout)
+            {
+                UpdateOther();
+                yield return null;
+            }
+            Assert.AreEqual(1, _game.RemotePlayers.Count, "Spielermodell des anderen wird gezeigt");
+
+            // Der andere hält ebenfalls das Gewehr und schaut zum Unity-Spieler: Zielhaltung im Bild.
+            var me = _game.Player.State.Position;
+            var him = _other.Prediction.State.Position;
+            _otherInput = new PlayerInput { Weapon = 1, Yaw = Mathf.Repeat(Mathf.Atan2(me.X - him.X, me.Z - him.Z) * Mathf.Rad2Deg, 360), Pitch = 10 };
+            _game.Player.TestSelectSlot(1);
+            AimAtOther(16f / 16);
+            yield return Run(0.6f);
+            Assert.AreEqual(1, _game.Player.Slot);
+            Assert.IsTrue(_game.Session.Prediction.Weapons.Switch == 0, "Waffe bereit");
+            yield return Screenshot("m5-model");
+
+            _game.Player.TestFire(true);
+            timeout = Time.realtimeSinceStartup + 5f;
+            while (kills.Count == 0 && Time.realtimeSinceStartup < timeout)
+            {
+                AimAtOther(16f / 16);
+                UpdateOther();
+                yield return null;
+            }
+            _game.Player.TestFire(false);
+            Assert.AreEqual(1, kills.Count, "der Server meldet den Kill");
+            Assert.AreEqual(_game.Session.PlayerId, kills[0].Attacker);
+            Assert.IsFalse(_other.Alive);
+            Assert.GreaterOrEqual(_game.Player.ShotsFired, 4, "4 Rumpftreffer à 25");
+            yield return Run(0.3f);
+            Assert.GreaterOrEqual(_game.Feed.HitsConfirmed, 4, "Trefferanzeige: Server hat die Treffer bestätigt");
+            Assert.AreEqual(1, _game.Feed.Kills.Count, "Kill-Anzeige");
+            Assert.AreEqual(0, _game.Session.Prediction.Mispredictions, "Waffen-Vorhersage stimmte");
+            Assert.Less(_game.Session.Prediction.Weapons.GetAmmo(1).Magazine, 30);
+            Assert.AreEqual(0, _game.RemotePlayers.Avatars.Count(), "Tote werden ausgeblendet");
+            yield return Screenshot("m5-kill");
+
+            // Granate zur Probe: fliegt sichtbar und explodiert (Effekte ohne Fehler)
+            _game.Player.TestSelectSlot(2);
+            yield return Run(0.5f);
+            _game.Player.TestLook(_game.Player.Yaw, 30);
+            _game.Player.TestFire(true);
+            yield return Run(0.1f);
+            _game.Player.TestFire(false);
+            timeout = Time.realtimeSinceStartup + 2f;
+            while (_game.Session.Projectiles.All.Count == 0 && Time.realtimeSinceStartup < timeout) yield return Run(0.05f);
+            Assert.AreEqual(1, _game.Session.Projectiles.All.Count, "Granate fliegt");
+            yield return Run(0.3f);
+            yield return Screenshot("m5-grenade");
+            timeout = Time.realtimeSinceStartup + 4f;
+            while (_game.Session.Projectiles.All.Count > 0 && Time.realtimeSinceStartup < timeout) yield return Run(0.05f);
+            yield return null;
+            Assert.Greater(_game.Effects.ActiveParticles, 10, "Explosion zu sehen");
+            yield return Screenshot("m5-explosion");
+
+            timeout = Time.realtimeSinceStartup + 7f;
+            while (!_other.Alive && Time.realtimeSinceStartup < timeout) yield return Run(0.1f);
+            Assert.IsTrue(_other.Alive, "Respawn nach 5 s");
+            Assert.AreEqual(100, _other.Health);
+        }
+
+        /// <summary>Blick auf den anderen Spieler, so wie die Spielszene ihn gerade zeigt (Höhe über den Füßen in Blöcken).</summary>
+        private void AimAtOther(float height)
+        {
+            if (!_game.Session.RemotePlayers.TryGetValue(_other.PlayerId, out var seen) || !seen.HasState) return;
+            var target = seen.Current.Position;
+            var eye = _game.Player.State.Eye(_game.Movement);
+            float dx = target.X - eye.X, dz = target.Z - eye.Z, dy = target.Y + height - eye.Y;
+            _game.Player.TestLook(Mathf.Repeat(Mathf.Atan2(dx, dz) * Mathf.Rad2Deg, 360), -Mathf.Atan2(dy, Mathf.Sqrt(dx * dx + dz * dz)) * Mathf.Rad2Deg);
+        }
+
         private void ConnectOtherClient()
         {
+            _otherInput = default;
             var registry = _game.Registry;
             _otherNet = new NetClient();
             _other = new ClientSession(registry, _game.Movement,
                 name => File.ReadAllBytes(Path.Combine(GameDataPaths.MapsFolder, name + MapFile.Extension)),
-                _otherNet, () => Time.realtimeSinceStartupAsDouble);
+                _otherNet, () => Time.realtimeSinceStartupAsDouble, _game.Combat);
             _otherNet.Session = _other;
             ServerAddress.TryParse("127.0.0.1:" + _port, out var address);
             _otherNet.Connect(address, DevJoinTicket.Create(Guid.NewGuid(), "Zweiter", DateTimeOffset.UtcNow));
@@ -156,7 +245,7 @@ namespace AoS2.Client.Tests
             while (Time.realtimeSinceStartupAsDouble >= _otherNextTick)
             {
                 _otherNextTick += 1.0 / 60;
-                _other.Tick(default);
+                _other.Tick(_otherInput);
             }
         }
 

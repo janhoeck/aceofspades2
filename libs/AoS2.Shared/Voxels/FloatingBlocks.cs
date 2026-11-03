@@ -44,7 +44,24 @@ namespace AoS2.Shared.Voxels
             var result = new List<List<GroupBlock>>();
             // Blöcke, deren Verbleib schon geklärt ist (verankert oder schon Teil einer gefundenen Gruppe).
             var settled = new HashSet<long>();
+            CheckNeighbours(world, x, y, z, maxGroupSize, settled, result);
+            return result;
+        }
 
+        /// <summary>
+        /// Wie <see cref="FindDetached(VoxelWorld, int, int, int, int)"/> für viele entfernte Blöcke auf einmal (Explosion):
+        /// Jeder Nachbarblock wird nur einmal untersucht, auch wenn er an mehrere entfernte Blöcke grenzt.
+        /// </summary>
+        public static List<List<GroupBlock>> FindDetached(VoxelWorld world, IReadOnlyList<BlockPos> removed, int maxGroupSize = DefaultMaxGroupSize)
+        {
+            var result = new List<List<GroupBlock>>();
+            var settled = new HashSet<long>();
+            foreach (var p in removed) CheckNeighbours(world, p.X, p.Y, p.Z, maxGroupSize, settled, result);
+            return result;
+        }
+
+        private static void CheckNeighbours(VoxelWorld world, int x, int y, int z, int maxGroupSize, HashSet<long> settled, List<List<GroupBlock>> result)
+        {
             for (var f = 0; f < BlockFaces.Count; f++)
             {
                 int nx = x + BlockFaces.DirX[f], ny = y + BlockFaces.DirY[f], nz = z + BlockFaces.DirZ[f];
@@ -55,7 +72,6 @@ namespace AoS2.Shared.Voxels
                 settled.UnionWith(visited);
                 if (group != null) result.Add(group);
             }
-            return result;
         }
 
         /// <summary>Hängt der Block (x, y, z) mit dem Boden zusammen? (Luft gilt als nicht verbunden.)</summary>

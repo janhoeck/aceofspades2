@@ -1,8 +1,10 @@
 using AoS2.Shared;
+using AoS2.Shared.Combat;
 using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Net;
 using AoS2.Shared.Net.Client;
+using AoS2.Shared.Rig;
 using AoS2.Shared.Voxels;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -35,7 +37,23 @@ internal static class TestArena
         ] }
         """);
 
+    public static MovementSettings Movement { get; } = new();
+
+    /// <summary>Kampfregeln, Waffen und Spielermodell aus dem echten data/-Ordner.</summary>
+    public static CombatSettings Combat { get; } = CombatSettings.Parse(File.ReadAllText(RepoFile("data/combat.json")), File.ReadAllText(RepoFile("data/weapons.json")), 60);
+
+    public static PlayerRig Rig { get; } = PlayerRig.Parse(File.ReadAllText(RepoFile("data/player_rig.json")));
+
     public static GameContent Content { get; } = CreateContent();
+
+    /// <summary>Pfad einer Datei relativ zum Repository (sucht AoS2.slnx von der Testausgabe aufwärts).</summary>
+    public static string RepoFile(string relativePath)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "AoS2.slnx"))) dir = dir.Parent;
+        if (dir == null) throw new InvalidOperationException("Repository-Wurzel (AoS2.slnx) nicht gefunden.");
+        return Path.Combine(dir.FullName, relativePath);
+    }
 
     private static GameContent CreateContent()
     {
@@ -55,7 +73,7 @@ internal static class TestArena
 
         using var file = new MemoryStream();
         MapFile.Write(file, world, metadata, Registry);
-        return new GameContent(Registry, new MovementSettings(), MapName, file.ToArray());
+        return new GameContent(Registry, Movement, Combat, Rig, MapName, file.ToArray());
     }
 
     /// <summary>Blickwinkel vom Auge eines stehenden Spielers bei <paramref name="feet"/> auf einen Punkt.</summary>
@@ -124,6 +142,14 @@ internal sealed class SimulatedNetwork : IMatchOutput
     }
 
     public ServerPlayer ServerPlayer(TestClient client) => Match.FindPlayer(client.PlayerId)!;
+
+    /// <summary>Setzt einen Spieler auf dem Server an eine Stelle (der Client korrigiert sich beim nächsten Snapshot).</summary>
+    public void Teleport(TestClient client, Vec3 feet)
+    {
+        var p = ServerPlayer(client);
+        p.State = new PlayerState { Position = feet, OnGround = true };
+        p.Remember(p.LastProcessedTick, p.State, p.LastInput);
+    }
 
     void IMatchOutput.Send(byte playerId, NetWriter message, Delivery delivery)
     {
@@ -221,8 +247,9 @@ internal sealed class TestClient : IMessageSender
         Name = name;
         var content = net.Content;
         Session = new ClientSession(content.Registry, content.Movement,
-            map => map == content.MapName ? content.MapFileBytes : null, this, () => net.Time);
+            map => map == content.MapName ? content.MapFileBytes : null, this, () => net.Time, content.Combat);
         Session.EditRejected += result => Rejected.Add(result);
+        Session.CombatEvent += e => Events.Add(e);
     }
 
     public string Name { get; }
@@ -240,6 +267,18 @@ internal sealed class TestClient : IMessageSender
     public List<BlockEditResult> Rejected { get; } = new();
     public List<BlockEditResult> LocalResults { get; } = new();
 
+    /// <summary>Kampf-Ereignisse, die beim Client angekommen sind.</summary>
+    public List<WorldEvent> Events { get; } = new();
+
+    /// <summary>Plätze der Waffen, die laut Vorhersage gefeuert haben.</summary>
+    public List<int> Fired { get; } = new();
+
+    /// <summary>So viele Ticks noch zusätzlich Feuern drücken (1 = ein einzelner Druck).</summary>
+    public int FireTicks { get; set; }
+
+    /// <summary>Anzeige des anderen Spielers in dem Moment, in dem zuletzt gefeuert wurde (für Lag-Ausgleich-Tests).</summary>
+    public Dictionary<byte, PlayerSnapshot> SeenAtLastShot { get; } = new();
+
     public PlayerState State => Session.Prediction.State;
 
     void IMessageSender.Send(NetWriter message, Delivery delivery) => ToServer.Enqueue(_net, message.ToArray(), delivery);
@@ -250,7 +289,19 @@ internal sealed class TestClient : IMessageSender
     public void Tick()
     {
         if (Session.Phase != ClientPhase.Playing) return;
-        for (var i = 0; i < TicksPerFrame; i++) Session.Tick(Input);
+        for (var i = 0; i < TicksPerFrame; i++)
+        {
+            var input = Input;
+            if (FireTicks > 0)
+            {
+                FireTicks--;
+                input.Buttons |= InputButtons.Fire;
+            }
+            if (input.Has(InputButtons.Fire))
+                foreach (var r in Session.RemotePlayers.Values) SeenAtLastShot[r.Id] = r.Current;
+            var fired = Session.Tick(input);
+            if (fired != 0) Fired.Add(fired);
+        }
         foreach (var action in _afterTick) LocalResults.Add(action(this));
         _afterTick.Clear();
     }

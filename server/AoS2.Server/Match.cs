@@ -1,7 +1,9 @@
 using AoS2.Shared;
+using AoS2.Shared.Combat;
 using AoS2.Shared.Maps;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Net;
+using AoS2.Shared.Rig;
 using AoS2.Shared.Voxels;
 using Microsoft.Extensions.Logging;
 
@@ -15,9 +17,9 @@ public interface IMatchOutput
 
 /// <summary>
 /// Die autoritative Simulation einer Runde, ohne Netzwerk-Code: Spieler, Eingaben, Blockänderungen,
-/// fallende Blöcke und Snapshots. Ein Aufruf von <see cref="Step"/> = ein Tick (60/s).
+/// fallende Blöcke, Kampf (siehe Match.Combat.cs) und Snapshots. Ein Aufruf von <see cref="Step"/> = ein Tick (60/s).
 /// </summary>
-public sealed class Match
+public sealed partial class Match
 {
     /// <summary>Alle 2 Ticks ein Snapshot: 30 pro Sekunde.</summary>
     public const int SnapshotInterval = 2;
@@ -62,6 +64,8 @@ public sealed class Match
         World = map.World;
         Metadata = map.Metadata;
         Falling = new FallingBlocks(World, content.Movement.Gravity, content.Movement.MaxFallSpeed);
+        BlockDamage = new BlockDamage(World, content.Registry);
+        _pose = new PlayerPose(content.Rig);
 
         // Jede Änderung seit Matchbeginn merken: Wer später beitritt, bekommt genau diese Liste.
         World.BlockChanged += (x, y, z, _, newId) => _changes[Key(x, y, z)] = newId;
@@ -109,7 +113,13 @@ public sealed class Match
         while (_players.ContainsKey(id)) id++;
 
         var spawn = new PlayerState { Position = Spawns.Pick(World, Metadata, _spawnCounter++) };
-        var player = new ServerPlayer(id, accountId, name, spawn);
+        var player = new ServerPlayer(id, accountId, name, spawn)
+        {
+            Health = _content.Combat.Health,
+            WeaponsState = WeaponState.Full(_content.Combat),
+            AnimationState = PlayerAnimator.Start(_content.Rig, Tick),
+        };
+        player.RecordView(Tick, ViewOf(player));
         onCreated?.Invoke(player); // der Transport ordnet die Verbindung zu, bevor die erste Nachricht rausgeht
 
         var welcome = new Welcome
@@ -152,6 +162,16 @@ public sealed class Match
         {
             BeginEvent(id);
             WorldEvents.WritePlayerJoined(_events[id], other.Id, other.Name);
+        }
+        foreach (var pos in BlockDamage.All())
+        {
+            BeginEvent(id);
+            WorldEvents.WriteBlockDamaged(_events[id], pos.X, pos.Y, pos.Z, BlockDamage.Level(pos.X, pos.Y, pos.Z));
+        }
+        foreach (var projectile in _projectiles)
+        {
+            BeginEvent(id);
+            WorldEvents.WriteProjectileSpawned(_events[id], projectile.Projectile, Tick);
         }
         BeginEvent(id);
         WorldEvents.WriteSyncComplete(_events[id]);
@@ -244,23 +264,35 @@ public sealed class Match
     public void Step()
     {
         Tick++;
+        RespawnDue();
         foreach (var p in _players.Values)
         {
             p.Budget = Math.Min(p.Budget + 1, MaxBudget);
             for (var steps = 0; steps < MaxStepsPerTick && p.Budget > 0 && p.Inputs.Count > 0; steps++)
             {
                 var input = p.Inputs.Dequeue();
+                if (!p.Alive) input.Buttons = InputButtons.None; // Tote schauen nur zu (wie auf dem Client)
                 p.Budget--;
                 p.LastProcessedTick++;
                 p.State = PlayerMovement.Step(p.State, input, World, _content.Movement);
+                var fired = WeaponSim.Step(ref p.WeaponsState, input, _content.Combat);
                 p.LastInput = input;
                 p.Remember(p.LastProcessedTick, p.State, input);
+                if (fired != 0) Fire(p, fired, input);
                 ProcessEdits(p);
             }
             ProcessEdits(p);
         }
 
+        StepProjectiles();
         Falling.Tick(_content.Movement.DeltaTime);
+
+        // Pose und Ansicht jedes Spielers zu diesem Tick merken: Gegen sie prüft der Lag-Ausgleich spätere Schüsse.
+        foreach (var p in _players.Values)
+        {
+            PlayerAnimator.Update(ref p.AnimationState, _content.Rig, p.State, _content.Movement, Tick);
+            p.RecordView(Tick, ViewOf(p));
+        }
 
         if (Tick % SnapshotInterval == 0)
             foreach (var p in _players.Values) SendSnapshot(p);
@@ -316,6 +348,7 @@ public sealed class Match
             state = p.State;
             input = p.LastInput;
         }
+        if (!p.Alive) return BlockEditResult.Dead;
         if (p.LastEditTick is { } last && e.Tick < last + BlockEditing.CooldownTicks) return BlockEditResult.TooFast;
 
         var movement = _content.Movement;
@@ -346,25 +379,28 @@ public sealed class Match
         s.ServerTick = Tick;
         s.AckInputTick = to.LastProcessedTick;
         s.Own = to.State;
+        s.OwnWeapons = to.WeaponsState;
+        s.OwnHealth = (byte)to.Health;
+        s.OwnRespawnTicks = to.Alive ? (ushort)0 : (ushort)Math.Min(to.RespawnAt - Tick, ushort.MaxValue);
+        s.OwnLife = to.Life;
         s.Players.Clear();
         s.Falling.Clear();
+
+        // Andere Spieler, so viele wie ins Paket passen (bis etwa 32 Spieler alle). Bei mehr Spielern kommen sie
+        // reihum dran; der Client interpoliert dann über eine längere Lücke.
+        var maxPlayers = (MaxSnapshotBytes - Snapshot.HeaderBytes) / Snapshot.MaxPlayerBytes;
+        var others = _players.Count - 1;
+        var first = others > maxPlayers ? (int)(Tick / SnapshotInterval % (uint)others) : 0;
+        var index = 0;
         foreach (var p in _players.Values)
         {
             if (p == to) continue;
-            s.Players.Add(new PlayerSnapshot
-            {
-                Id = p.Id,
-                Position = p.State.Position,
-                Yaw = p.LastInput.Yaw,
-                Pitch = p.LastInput.Pitch,
-                Crouching = p.State.Crouching,
-                OnGround = p.State.OnGround,
-            });
+            var k = (index++ - first + others) % Math.Max(others, 1);
+            if (k < maxPlayers) s.Players.Add(ViewOf(p));
         }
 
         // So viele fallende Gruppen, wie in das Paket passen (je höchstens 9 Byte). Die übrigen kommen im nächsten Snapshot.
-        const int headerBytes = 1 + 4 + 4 + 25 + 1 + 1;
-        var room = (MaxSnapshotBytes - headerBytes - s.Players.Count * 18) / 9;
+        var room = (MaxSnapshotBytes - Snapshot.HeaderBytes - s.Players.Count * Snapshot.MaxPlayerBytes) / 9;
         var groups = Falling.Groups;
         var take = Math.Min(Math.Min(room, groups.Count), byte.MaxValue);
         var start = groups.Count > take ? (int)(Tick / SnapshotInterval % (uint)groups.Count) : 0;

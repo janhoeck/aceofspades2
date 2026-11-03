@@ -1,4 +1,6 @@
+using AoS2.Shared.Combat;
 using AoS2.Shared.Movement;
+using AoS2.Shared.Rig;
 
 namespace AoS2.Shared.Net
 {
@@ -96,11 +98,18 @@ namespace AoS2.Shared.Net
 
         public static Vec3 ReadVec(NetReader r) => new Vec3(r.ReadFiniteFloat(), r.ReadFiniteFloat(), r.ReadFiniteFloat());
 
+        /// <summary>Eingabe; nur wenn gefeuert wird, folgt der gesehene Server-Tick (Ganzzahl + 1/256-Bruchteil) für den Lag-Ausgleich.</summary>
         public static void WriteInput(NetWriter w, PlayerInput input)
         {
             w.WriteUShort((ushort)input.Buttons);
             w.WriteFloat(input.Yaw);
             w.WriteFloat(input.Pitch);
+            w.WriteByte(input.Weapon);
+            if (!input.Has(InputButtons.Fire)) return;
+            var view = input.ViewTick < 0 ? 0 : input.ViewTick > uint.MaxValue ? uint.MaxValue : input.ViewTick;
+            var whole = (uint)view;
+            w.WriteUInt(whole);
+            w.WriteByte((byte)((view - whole) * 256));
         }
 
         public static PlayerInput ReadInput(NetReader r)
@@ -110,11 +119,81 @@ namespace AoS2.Shared.Net
             var yaw = r.ReadFiniteFloat();
             var pitch = r.ReadFiniteFloat();
             if (yaw < -720f || yaw > 720f || pitch < -90f || pitch > 90f) throw new ProtocolException("Blickrichtung außerhalb des erlaubten Bereichs.");
-            return new PlayerInput { Buttons = (InputButtons)buttons, Yaw = yaw, Pitch = pitch };
+            var input = new PlayerInput { Buttons = (InputButtons)buttons, Yaw = yaw, Pitch = pitch, Weapon = r.ReadByte() };
+            if (input.Weapon > Combat.CombatSettings.MaxWeapons) throw new ProtocolException($"Ungültiger Waffenplatz {input.Weapon}.");
+            if (input.Has(InputButtons.Fire)) input.ViewTick = r.ReadUInt() + r.ReadByte() / 256.0;
+            return input;
         }
 
         private const InputButtons AllButtons = InputButtons.Forward | InputButtons.Back | InputButtons.Left | InputButtons.Right |
-                                                InputButtons.Jump | InputButtons.Crouch | InputButtons.Sprint;
+                                                InputButtons.Jump | InputButtons.Crouch | InputButtons.Sprint |
+                                                InputButtons.Fire | InputButtons.Reload;
+
+        /// <summary>Waffen des eigenen Spielers in voller Genauigkeit (für den Abgleich wie die Bewegung).</summary>
+        public static void WriteWeapons(NetWriter w, WeaponState s)
+        {
+            w.WriteByte(s.Slot);
+            w.WriteByte(s.Cooldown);
+            w.WriteByte(s.Switch);
+            w.WriteUShort(s.Reload);
+            w.WriteByte((byte)(s.TriggerHeld ? 1 : 0));
+            for (var slot = 1; slot <= Combat.CombatSettings.MaxWeapons; slot++)
+            {
+                var a = s.GetAmmo(slot);
+                w.WriteShort(a.Magazine);
+                w.WriteShort(a.Reserve);
+            }
+        }
+
+        public static WeaponState ReadWeapons(NetReader r)
+        {
+            var s = new WeaponState { Slot = r.ReadByte(), Cooldown = r.ReadByte(), Switch = r.ReadByte(), Reload = r.ReadUShort() };
+            var flags = r.ReadByte();
+            if (flags > 1 || s.Slot > Combat.CombatSettings.MaxWeapons) throw new ProtocolException("Ungültiger Waffenzustand.");
+            s.TriggerHeld = flags == 1;
+            for (var slot = 1; slot <= Combat.CombatSettings.MaxWeapons; slot++)
+            {
+                var a = new WeaponAmmo { Magazine = r.ReadShort(), Reserve = r.ReadShort() };
+                if (a.Magazine < 0 || a.Reserve < 0) throw new ProtocolException("Negative Munition.");
+                s.SetAmmo(slot, a);
+            }
+            return s;
+        }
+
+        /// <summary>
+        /// Animationszustand relativ zum Snapshot-Tick: Ticks als untere 16 Bit (der Server hält die Abstände klein,
+        /// siehe <see cref="PlayerAnimator"/>). Die Überblendung kommt nur mit, solange sie läuft.
+        /// </summary>
+        public static void WriteAnimation(NetWriter w, AnimationState a, bool blending)
+        {
+            w.WriteByte(a.Animation);
+            w.WriteUShort((ushort)a.Start);
+            if (!blending) return;
+            w.WriteByte(a.Previous);
+            w.WriteUShort((ushort)a.PreviousStart);
+            w.WriteUShort((ushort)a.BlendStart);
+        }
+
+        public static AnimationState ReadAnimation(NetReader r, uint tick, bool blending)
+        {
+            var a = new AnimationState { Animation = r.ReadByte(), Start = Unwrap(r.ReadUShort(), tick) };
+            if (blending)
+            {
+                a.Previous = r.ReadByte();
+                a.PreviousStart = Unwrap(r.ReadUShort(), tick);
+                a.BlendStart = Unwrap(r.ReadUShort(), tick);
+            }
+            else
+            {
+                a.Previous = a.Animation;
+                a.PreviousStart = a.Start;
+                a.BlendStart = tick < PlayerAnimator.BlendTicks ? 0 : tick - PlayerAnimator.BlendTicks;
+            }
+            return a;
+        }
+
+        /// <summary>Volle Tick-Nummer aus den unteren 16 Bit: der letzte Tick bis <paramref name="reference"/> mit diesen Bits.</summary>
+        public static uint Unwrap(ushort low, uint reference) => reference - (ushort)(reference - low);
 
         public static void WriteBlockPos(NetWriter w, int x, int y, int z)
         {

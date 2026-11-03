@@ -35,7 +35,7 @@ Ein zweiter Rechner im selben Netz verbindet sich mit der IP-Adresse des Server-
 
 ### 1.4 Was man sehen sollte
 
-- Beide Spieler sehen sich gegenseitig als Platzhalter (Säule aus zwei Baublöcken, kleiner Block als „Nase“ in Blickrichtung) mit Namen darüber.
+- Beide Spieler sehen sich gegenseitig als würfeliges Spielermodell mit Animationen (Stehen, Gehen, Rennen, Ducken, Springen) und Namen darüber. Mit einer Waffe in der Hand zeigen die Arme in Blickrichtung, der Kopf neigt sich mit dem Blick.
 - Die eigene Bewegung reagiert sofort (Vorhersage), die des anderen läuft flüssig, gut 100 ms verzögert (Interpolation).
 - Abbauen und Bauen erscheinen sofort und beim anderen kurz danach. Lehnt der Server ab (z. B. Block in einen Mitspieler gebaut), verschwindet der Block wieder und unten steht der Grund.
 - Fallende Blockgruppen fallen bei beiden gleich und landen an derselben Stelle.
@@ -44,7 +44,31 @@ Ein zweiter Rechner im selben Netz verbindet sich mit der IP-Adresse des Server-
 
 **Esc** gibt die Maus frei, ein zweites **Esc** trennt die Verbindung und geht zurück ins Startmenü.
 
-### 1.5 Mit echter Anmeldung (lokales Backend)
+### 1.5 Gegeneinander kämpfen (seit M5)
+
+| Taste | Aktion |
+|---|---|
+| 1 | Spaten: Linksklick abbauen, Rechtsklick bauen, **B** wechselt den Baublock |
+| 2 | Sturmgewehr (Linksklick gedrückt halten: Dauerfeuer) |
+| 3 | Granate (ein Klick = ein Wurf, explodiert nach 3 s) |
+| 4 | Raketenwerfer (explodiert beim Aufprall) |
+| Mausrad | Waffe wechseln |
+| R | nachladen (leere Magazine laden von selbst nach) |
+
+So probiert man alles aus:
+
+1. Beide Clients verbunden (Abschnitt 1.2 und 1.3), beide Fenster nebeneinander. Die Spieler erscheinen nebeneinander auf der blauen Spawn-Plattform.
+2. Im einen Fenster **2** drücken, auf den anderen Spieler zielen und schießen. Bei jedem Treffer erscheint um das Fadenkreuz ein Kreuz (gelb bei Kopfschuss, rot beim tödlichen Treffer), der Getroffene leuchtet kurz auf, sein Bildschirm bekommt einen roten Rand auf der Seite des Schützen und unten links sinkt sein Leben. Rumpf 25, Kopf 50, Arme/Beine 17 Schaden; 100 Leben.
+3. Bei 0 Leben zerfällt der Getroffene in Würfel; oben rechts steht der Kill. Er selbst sieht „Getötet von …“ und einen Countdown und erscheint nach **5 Sekunden** an einem Spawnpunkt mit vollem Leben und voller Munition.
+4. Mit **4** eine Rakete auf eine Wand oder einen Turm schießen: Blöcke im Umkreis verschwinden, Ränder bekommen Risse, freistehende Teile fallen herunter. Spieler in der Nähe nehmen Schaden, auch man selbst.
+5. Mit **3** eine Granate werfen: Sie prallt ab, bleibt liegen und explodiert nach 3 Sekunden.
+6. Ein paar Schüsse mit dem Gewehr auf einen Block: Er bekommt Risse und bricht nach einigen Treffern (Erde und Gras eher, Stein später).
+
+Werte (Schaden, Feuerrate, Magazine, Explosionsradius, Respawn-Zeit, Trefferzonen) stehen in `data/weapons.json` und `data/combat.json`. Nach einer Änderung Server **und** Spiel neu starten: Der Server entscheidet, das Spiel nutzt die Werte für die Vorhersage (Munition, Feuerrate) und die Anzeige.
+
+Den **Lag-Ausgleich** sieht man am besten mit einem zweiten Rechner oder künstlicher Verzögerung: Man trifft den anderen dort, wo man ihn sieht, obwohl er auf dem Server schon ein Stück weiter ist. Wie das funktioniert: [architecture.md, Abschnitt Kampf](architecture.md#kampf-seit-m5).
+
+### 1.6 Mit echter Anmeldung (lokales Backend)
 
 Läuft das lokale Backend mit Website ([backend.md](backend.md#3-lokal-entwickeln)), kann der Server echte Join-Tickets prüfen:
 
@@ -76,7 +100,7 @@ Entwicklungs-Tickets haben dasselbe Format wie echte (JWT), sind aber mit einem 
 | `--port <zahl>` | 32887 | UDP-Port |
 | `--map <name>` | `testmap` | Map aus dem `maps`-Ordner, ohne `.aos2map` |
 | `--max-players <zahl>` | 32 | höchstens so viele Spieler (bis 48) |
-| `--data <ordner>` | `data` neben der exe | `blocks.json`, `movement.json`, `player_rig.json` |
+| `--data <ordner>` | `data` neben der exe | `blocks.json`, `movement.json`, `player_rig.json`, `combat.json`, `weapons.json` |
 | `--maps <ordner>` | `maps` neben der exe | Maps |
 | `--site <url>` | – | Adresse der Website; von dort holt der Server die öffentlichen Schlüssel für Join-Tickets (`/api/.well-known/jwks.json`) |
 | `--address <host:port>` | – | Adresse dieses Servers, wie Spieler sie eingeben. Steht im Ticket; Pflicht mit `--site` |

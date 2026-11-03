@@ -62,10 +62,10 @@ Im Unity-Editor die Szene `Assets/Scenes/Game.unity` öffnen, *Play* drücken un
 | Shift (links) | sprinten |
 | Linksklick | Block abbauen |
 | Rechtsklick | Block bauen |
-| 1–9, Mausrad | Baublock wählen |
+| B | Baublock wechseln |
 | Esc | Maus freigeben (zweimal: zurück ins Startmenü) |
 
-Blocktypen stehen in `data/blocks.json`, Bewegungswerte in `data/movement.json`; im Editor wirken Änderungen beim nächsten *Play*.
+Blocktypen stehen in `data/blocks.json`, Bewegungswerte in `data/movement.json`; im Editor wirken Änderungen beim nächsten *Play*. Waffen gibt es nur im Netzspiel (der Server entscheidet über Treffer).
 
 ## Mit Server spielen (lokal, zwei Clients)
 
@@ -74,6 +74,8 @@ dotnet run --project server/AoS2.Server -- --dev   # Server im Entwicklungsmodus
 ```
 
 Dann im Editor *Play* und im Startmenü mit `127.0.0.1:32887` und Haken bei **Entwicklungs-Ticket** verbinden; ein Windows-Build (*AoS2 → Windows-Build erstellen*) ist der zweite Client. Ausführlich: [docs/server.md](docs/server.md).
+
+Im Netzspiel wird gekämpft: **1** Spaten, **2** Sturmgewehr, **3** Granate, **4** Raketenwerfer (oder Mausrad), Linksklick feuert, **R** lädt nach. Werte in `data/weapons.json` und `data/combat.json`, Anleitung zum Ausprobieren in [docs/server.md](docs/server.md#15-gegeneinander-kämpfen-seit-m5).
 
 Launcher und Spiel lokal ausprobieren, mit lokaler Website, lokalem Backend und Entwicklungs-Login statt Discord (Details in [docs/backend.md](docs/backend.md#3-lokal-entwickeln) und [docs/release.md](docs/release.md#5-ohne-r2-lokal-testen)):
 

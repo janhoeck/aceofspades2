@@ -6,7 +6,7 @@ namespace AoS2.Shared
     /// </summary>
     public static class ProtocolInfo
     {
-        public const int Version = 1;
+        public const int Version = 2;
 
         /// <summary>Standard-UDP-Port der Spielserver.</summary>
         public const int DefaultPort = 32887;

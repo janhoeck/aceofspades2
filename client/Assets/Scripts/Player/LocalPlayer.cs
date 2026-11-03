@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using AoS2.Shared;
+using AoS2.Shared.Combat;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Voxels;
 using UnityEngine;
@@ -14,8 +15,13 @@ namespace AoS2.Client.Player
     /// laufen ebenfalls im Tick, mit kurzer Pause zwischen zwei Aktionen.
     /// Online rechnet die <see cref="AoS2.Shared.Net.Client.ClientSession"/> den Tick (Vorhersage) und schickt die Eingabe an den Server.
     ///
-    /// Steuerung: WASD laufen, Maus schauen, Leertaste springen, Strg ducken, Shift sprinten,
-    /// Linksklick abbauen, Rechtsklick bauen, 1–9 / Mausrad Blocktyp, Esc gibt die Maus frei (zweimal: zurück ins Startmenü).
+    /// Online kommen die Waffen dazu (Platz 2 … 4): Linksklick feuert, R lädt nach. Die Waffen rechnet die Session wie die
+    /// Bewegung voraus; feuert sie, zeigt der Spieler sofort Mündungsfeuer und Leuchtspur, getroffen hat aber erst, was der
+    /// Server bestätigt.
+    ///
+    /// Steuerung: WASD laufen, Maus schauen, Leertaste springen, Strg ducken, Shift sprinten, 1 Spaten, 2–4 Waffen,
+    /// Mausrad Waffe wechseln, mit Spaten: Linksklick abbauen, Rechtsklick bauen, B Baublock; mit Waffe: Linksklick feuern,
+    /// R nachladen. Esc gibt die Maus frei (zweimal: zurück ins Startmenü).
     /// </summary>
     public sealed class LocalPlayer : MonoBehaviour
     {
@@ -42,6 +48,11 @@ namespace AoS2.Client.Player
         private bool _placeRequested;
         private bool _waitForRelease;
         private int _cooldownTicks;
+        private bool _fireHeld;
+        private bool _testFireHeld;
+        private bool _fireRequested;
+        private bool _reloadRequested;
+        private WeaponView _weaponView;
         private float _visualEyeHeight;
         private float _stepOffset;
         private readonly List<BlockType> _buildable = new List<BlockType>();
@@ -51,6 +62,15 @@ namespace AoS2.Client.Player
         public float Pitch => _pitch;
         public BlockType SelectedBlock => _buildable.Count > 0 ? _buildable[SelectedIndex] : null;
         public int SelectedIndex { get; private set; }
+
+        /// <summary>Gewählter Platz: 0 = Spaten, 1 … = Waffen aus weapons.json (offline nur der Spaten).</summary>
+        public int Slot { get; private set; }
+
+        /// <summary>Waffen, wie die Vorhersage sie gerade sieht (offline leer).</summary>
+        public WeaponState Weapons => _game.Session?.Prediction?.Weapons ?? default;
+
+        /// <summary>Wie oft die eigene Waffe laut Vorhersage gefeuert hat (für Tests).</summary>
+        public int ShotsFired { get; private set; }
 
         /// <summary>Block unter dem Fadenkreuz (in Reichweite), sonst <c>null</c>.</summary>
         public VoxelHit? Target { get; private set; }
@@ -63,6 +83,16 @@ namespace AoS2.Client.Player
         {
             _yaw = yaw;
             _pitch = pitch;
+        }
+
+        /// <summary>Für Tests: Waffenplatz wählen (wie die Zifferntasten).</summary>
+        public void TestSelectSlot(int slot) => SelectSlot(slot);
+
+        /// <summary>Für Tests: Feuern gedrückt halten oder loslassen.</summary>
+        public void TestFire(bool held)
+        {
+            _testFireHeld = held;
+            _fireRequested |= held;
         }
 
         /// <summary>Für Tests: wie ein Klick – im nächsten Tick den anvisierten Block abbauen oder bauen.</summary>
@@ -84,6 +114,7 @@ namespace AoS2.Client.Player
             _previous = _state;
             _visualEyeHeight = game.Movement.EyeHeight(false);
             _highlight = BlockHighlight.Create(highlightMaterial);
+            if (game.EffectMaterial != null) _weaponView = WeaponView.Create(transform, game.EffectMaterial);
             foreach (var type in game.Registry.All)
                 if (type.Buildable) _buildable.Add(type);
             transform.SetParent(null);
@@ -118,6 +149,7 @@ namespace AoS2.Client.Player
             }
             if (Cursor.lockState != CursorLockMode.Locked)
             {
+                _fireHeld = false; // Maus freigegeben: nicht weiterschießen
                 if (mouse.leftButton.wasPressedThisFrame && Application.isFocused)
                 {
                     SetCursorLocked(true);
@@ -132,31 +164,51 @@ namespace AoS2.Client.Player
 
             // Gedrückt halten wiederholt die Aktion nach jeder Pause; ein kurzer Klick zwischen zwei Ticks geht nicht verloren.
             if (_waitForRelease) _waitForRelease = mouse.leftButton.isPressed || mouse.rightButton.isPressed;
-            else
+            else if (Slot == 0)
             {
                 _removeRequested |= mouse.leftButton.isPressed;
                 _placeRequested |= mouse.rightButton.isPressed;
             }
-
-            if (_buildable.Count > 0)
+            else
             {
-                for (var i = 0; i < Mathf.Min(9, _buildable.Count); i++)
-                    if (keyboard[Key.Digit1 + i].wasPressedThisFrame) SelectedIndex = i;
-                var scroll = mouse.scroll.ReadValue().y;
-                if (scroll != 0) SelectedIndex = (SelectedIndex + (scroll < 0 ? 1 : -1) + _buildable.Count) % _buildable.Count;
+                _fireHeld = mouse.leftButton.isPressed;
+                _fireRequested |= mouse.leftButton.wasPressedThisFrame;
             }
+            _reloadRequested |= keyboard.rKey.wasPressedThisFrame;
+
+            for (var i = 0; i < 4; i++)
+                if (keyboard[Key.Digit1 + i].wasPressedThisFrame) SelectSlot(i);
+            var scroll = mouse.scroll.ReadValue().y;
+            if (scroll != 0) SelectSlot((Slot + (scroll < 0 ? 1 : -1) + SlotCount + 1) % (SlotCount + 1));
+            if (keyboard.bKey.wasPressedThisFrame && _buildable.Count > 0) SelectedIndex = (SelectedIndex + 1) % _buildable.Count;
+        }
+
+        /// <summary>Waffenplätze außer dem Spaten (offline keine).</summary>
+        private int SlotCount => _game.Session?.Combat?.SlotCount ?? 0;
+
+        private void SelectSlot(int slot)
+        {
+            if (slot < 0 || slot > SlotCount) return;
+            Slot = slot;
+            _fireHeld = false;
+            _fireRequested = false;
         }
 
         public void Tick()
         {
             _previous = _state;
-            var input = new PlayerInput { Buttons = ReadButtons(), Yaw = _yaw, Pitch = _pitch };
+            var input = new PlayerInput { Buttons = ReadButtons(), Yaw = _yaw, Pitch = _pitch, Weapon = (byte)Slot };
+            if (Slot != 0 && (_fireHeld || _testFireHeld || _fireRequested)) input.Buttons |= InputButtons.Fire;
+            if (Slot != 0 && _reloadRequested) input.Buttons |= InputButtons.Reload;
+            _fireRequested = false;
+            _reloadRequested = false;
             var session = _game.Session;
             if (session != null)
             {
                 // Online: vorhersagen und die Eingabe an den Server schicken (siehe ClientPrediction).
-                session.Tick(input);
+                var fired = session.Tick(input);
                 _state = session.Prediction.State;
+                if (fired != 0) OnFired(fired, input);
             }
             else
             {
@@ -211,8 +263,36 @@ namespace AoS2.Client.Player
             var feet = Vector3.Lerp(ToUnity(_previous.Position), ToUnity(_state.Position), alpha) + _correctionOffset;
             transform.SetPositionAndRotation(feet + Vector3.up * (_visualEyeHeight + _stepOffset), Quaternion.Euler(_pitch, _yaw, 0));
 
-            Target = Raycast(out var hit) ? hit : (VoxelHit?)null;
+            Target = Slot == 0 && Raycast(out var hit) ? hit : (VoxelHit?)null;
             _highlight.Show(Target);
+            var session = _game.Session;
+            var w = Weapons;
+            _weaponView?.Show(Slot, Slot != 0 && (w.Reload > 0 || w.Switch > 0), session == null || session.Alive);
+        }
+
+        /// <summary>
+        /// Die eigene Waffe hat laut Vorhersage gefeuert: Mündungsfeuer und Rückstoß sofort. Beim Gewehr zeigt eine Leuchtspur
+        /// bis zum ersten Block, wohin der Schuss geht; ob ein Spieler getroffen ist, meldet der Server (Trefferanzeige).
+        /// </summary>
+        private void OnFired(int slot, PlayerInput input)
+        {
+            ShotsFired++;
+            var weapon = _game.Session.Combat.Weapon(slot);
+            _weaponView?.Kick(weapon != null && weapon.Kind == WeaponKind.Rocket ? 1 : 0.5f);
+            var effects = _game.Effects;
+            if (effects == null || weapon == null) return;
+            var dir = PlayerMovement.LookDirection(input.Yaw, input.Pitch);
+            var muzzle = _weaponView != null ? _weaponView.Muzzle : ToUnity(_state.Eye(_game.Movement));
+            effects.MuzzleFlash(muzzle, ToUnity(dir));
+            if (weapon.Kind != WeaponKind.Hitscan) return;
+            var eye = _state.Eye(_game.Movement);
+            var end = eye + dir * weapon.Range;
+            if (VoxelRaycast.Cast(_game.World, eye, dir, weapon.Range, out var hit))
+            {
+                end = eye + dir * hit.Distance;
+                effects.BlockImpact(ToUnity(end), new Vector3(hit.NormalX, hit.NormalY, hit.NormalZ), _game.World.GetBlock(hit.X, hit.Y, hit.Z));
+            }
+            effects.Tracer(muzzle, ToUnity(end));
         }
 
         private void EditBlock(bool remove)
@@ -257,6 +337,7 @@ namespace AoS2.Client.Player
         private void OnDestroy()
         {
             if (_highlight != null) Destroy(_highlight.gameObject);
+            if (_weaponView != null) Destroy(_weaponView.gameObject);
         }
 
         private static Vector3 ToUnity(Vec3 v) => new Vector3(v.X, v.Y, v.Z);

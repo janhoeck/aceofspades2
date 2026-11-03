@@ -1,5 +1,8 @@
 using System.Collections.Generic;
+using AoS2.Shared;
+using AoS2.Shared.Combat;
 using AoS2.Shared.Movement;
+using AoS2.Shared.Rig;
 using AoS2.Shared.Voxels;
 
 namespace AoS2.Shared.Net
@@ -199,7 +202,7 @@ namespace AoS2.Shared.Net
         }
     }
 
-    /// <summary>Ein anderer Spieler im Snapshot (gerundet, nur für die Anzeige).</summary>
+    /// <summary>Ein anderer Spieler im Snapshot (Blickwinkel gerundet, nur für die Anzeige und den Lag-Ausgleich).</summary>
     public struct PlayerSnapshot
     {
         public byte Id;
@@ -208,6 +211,44 @@ namespace AoS2.Shared.Net
         public float Pitch;
         public bool Crouching;
         public bool OnGround;
+
+        /// <summary>Lebt der Spieler? Tote werden nicht gezeigt und nicht getroffen.</summary>
+        public bool Alive;
+
+        /// <summary>Zählt die Leben (+1 bei jedem Respawn): Zwischen zwei Leben wird nicht interpoliert, man springt zum Spawn.</summary>
+        public byte Life;
+
+        /// <summary>Gewählter Platz (0 = Spaten), bestimmt die Haltung der Arme.</summary>
+        public byte Weapon;
+
+        public AnimationState Animation;
+
+        /// <summary>Blickwinkel so gerundet, wie sie im Snapshot ankommen. Der Server merkt sich diese Werte für den Lag-Ausgleich.</summary>
+        public PlayerSnapshot Quantized()
+        {
+            var q = this;
+            q.Yaw = NetCodec.DequantizeYaw(NetCodec.QuantizeYaw(Yaw));
+            q.Pitch = NetCodec.DequantizePitch(NetCodec.QuantizePitch(Pitch));
+            return q;
+        }
+
+        /// <summary>
+        /// Zwischenwert zweier Snapshots (Interpolation). Client (Anzeige) und Server (Lag-Ausgleich) nutzen genau diese
+        /// Rechnung, damit der Server dieselbe Position und Pose prüft, die der Schütze gesehen hat. Ganzzahlige Werte
+        /// (Haltung, Animation, Waffe) kommen vom näheren Snapshot; nach einem Respawn wird nicht interpoliert.
+        /// </summary>
+        public static PlayerSnapshot Lerp(PlayerSnapshot a, PlayerSnapshot b, float t)
+        {
+            if (a.Life != b.Life) return t >= 1 ? b : a.Alive ? a : b;
+            var later = t >= 0.5f ? b : a;
+            var yawDelta = b.Yaw - a.Yaw;
+            if (yawDelta > 180f) yawDelta -= 360f;
+            else if (yawDelta < -180f) yawDelta += 360f;
+            later.Position = a.Position + (b.Position - a.Position) * t;
+            later.Yaw = a.Yaw + yawDelta * t;
+            later.Pitch = a.Pitch + (b.Pitch - a.Pitch) * t;
+            return later;
+        }
     }
 
     /// <summary>Wie weit eine fallende Gruppe gerade gefallen ist.</summary>
@@ -223,17 +264,37 @@ namespace AoS2.Shared.Net
     /// </summary>
     public sealed class Snapshot
     {
+        /// <summary>Größe eines anderen Spielers im Snapshot: höchstens so viele Byte (mit laufender Überblendung).</summary>
+        public const int MaxPlayerBytes = 1 + 12 + 2 + 2 + 1 + 1 + 1 + 3 + 5;
+
+        /// <summary>Größe ohne andere Spieler und fallende Gruppen.</summary>
+        public const int HeaderBytes = 1 + 4 + 4 + 25 + 1 + 2 + 1 + (6 + 4 * CombatSettings.MaxWeapons) + 1 + 1;
+
         public uint ServerTick;
 
         /// <summary>Letzte verarbeitete Eingabe des Empfängers. <see cref="Own"/> ist der Zustand direkt danach.</summary>
         public uint AckInputTick;
 
         public PlayerState Own;
+
+        /// <summary>Waffen des Empfängers nach <see cref="AckInputTick"/> (für den Abgleich der Vorhersage).</summary>
+        public WeaponState OwnWeapons;
+
+        /// <summary>Lebenspunkte des Empfängers (0 = tot).</summary>
+        public byte OwnHealth;
+
+        /// <summary>Tot: Ticks bis zum Respawn.</summary>
+        public ushort OwnRespawnTicks;
+
+        public byte OwnLife;
+
         public readonly List<PlayerSnapshot> Players = new List<PlayerSnapshot>();
         public readonly List<FallingSnapshot> Falling = new List<FallingSnapshot>();
 
         private const byte FlagOnGround = 1;
         private const byte FlagCrouching = 2;
+        private const byte FlagAlive = 4;
+        private const byte FlagBlending = 8;
 
         public void Write(NetWriter w)
         {
@@ -241,14 +302,23 @@ namespace AoS2.Shared.Net
             w.WriteUInt(ServerTick);
             w.WriteUInt(AckInputTick);
             NetCodec.WriteState(w, Own);
+            w.WriteByte(OwnHealth);
+            w.WriteUShort(OwnRespawnTicks);
+            w.WriteByte(OwnLife);
+            NetCodec.WriteWeapons(w, OwnWeapons);
             w.WriteByte((byte)Players.Count);
             foreach (var p in Players)
             {
+                var blending = p.Animation.IsBlending(ServerTick) && p.Animation.Previous != p.Animation.Animation;
                 w.WriteByte(p.Id);
                 NetCodec.WriteVec(w, p.Position);
                 w.WriteUShort(NetCodec.QuantizeYaw(p.Yaw));
                 w.WriteShort(NetCodec.QuantizePitch(p.Pitch));
-                w.WriteByte((byte)((p.OnGround ? FlagOnGround : 0) | (p.Crouching ? FlagCrouching : 0)));
+                w.WriteByte((byte)((p.OnGround ? FlagOnGround : 0) | (p.Crouching ? FlagCrouching : 0) |
+                                   (p.Alive ? FlagAlive : 0) | (blending ? FlagBlending : 0)));
+                w.WriteByte(p.Life);
+                w.WriteByte(p.Weapon);
+                NetCodec.WriteAnimation(w, p.Animation, blending);
             }
             w.WriteByte((byte)Falling.Count);
             foreach (var f in Falling)
@@ -261,6 +331,10 @@ namespace AoS2.Shared.Net
         public static Snapshot Read(NetReader r)
         {
             var s = new Snapshot { ServerTick = r.ReadUInt(), AckInputTick = r.ReadUInt(), Own = NetCodec.ReadState(r) };
+            s.OwnHealth = r.ReadByte();
+            s.OwnRespawnTicks = r.ReadUShort();
+            s.OwnLife = r.ReadByte();
+            s.OwnWeapons = NetCodec.ReadWeapons(r);
             int players = r.ReadByte();
             if (players > NetLimits.MaxPlayers) throw new ProtocolException("Zu viele Spieler im Snapshot.");
             for (var i = 0; i < players; i++)
@@ -273,8 +347,14 @@ namespace AoS2.Shared.Net
                     Pitch = NetCodec.DequantizePitch(r.ReadShort()),
                 };
                 var flags = r.ReadByte();
+                if ((flags & ~(FlagOnGround | FlagCrouching | FlagAlive | FlagBlending)) != 0) throw new ProtocolException("Unbekannte Spieler-Flags.");
                 p.OnGround = (flags & FlagOnGround) != 0;
                 p.Crouching = (flags & FlagCrouching) != 0;
+                p.Alive = (flags & FlagAlive) != 0;
+                p.Life = r.ReadByte();
+                p.Weapon = r.ReadByte();
+                if (p.Weapon > CombatSettings.MaxWeapons) throw new ProtocolException($"Ungültiger Waffenplatz {p.Weapon}.");
+                p.Animation = NetCodec.ReadAnimation(r, s.ServerTick, (flags & FlagBlending) != 0);
                 s.Players.Add(p);
             }
             int groups = r.ReadByte();
@@ -304,6 +384,32 @@ namespace AoS2.Shared.Net
 
         /// <summary>Ende der Welt-Synchronisation beim Beitritt: Ab jetzt ist die Welt des Clients vollständig.</summary>
         SyncComplete = 7,
+
+        /// <summary>Ein Block ist beschädigt (<see cref="WorldEvent.Level"/> 1 … 255 = Anteil an seinen Lebenspunkten).</summary>
+        BlockDamaged = 8,
+
+        /// <summary>Ein Spieler hat Schaden genommen (an alle: Trefferanzeige beim Schützen, Anzeige beim Getroffenen).</summary>
+        PlayerDamaged = 9,
+
+        /// <summary>Ein Spieler ist gestorben (an alle, für die Kill-Anzeige). Bei Selbstmord ist der Schütze das Opfer.</summary>
+        PlayerKilled = 10,
+
+        /// <summary>Ein anderer Spieler hat geschossen (Mündungsfeuer und Leuchtspur bis zum Einschlag). Nicht an den Schützen.</summary>
+        ShotFired = 11,
+
+        /// <summary>Ein Geschoss fliegt los. Der Client rechnet seine Bahn ab <see cref="WorldEvent.Tick"/> zur Anzeige nach.</summary>
+        ProjectileSpawned = 12,
+
+        /// <summary>Ein Geschoss explodiert (Blöcke und Schaden kommen als eigene Ereignisse).</summary>
+        ProjectileExploded = 13,
+    }
+
+    /// <summary>Was ein Schuss getroffen hat (<see cref="WorldEventType.ShotFired"/>).</summary>
+    public enum ShotHit : byte
+    {
+        Nothing = 0,
+        Block = 1,
+        Player = 2,
     }
 
     /// <summary>
@@ -324,6 +430,34 @@ namespace AoS2.Shared.Net
         public int Offset;
         public byte PlayerId;
         public string Name;
+
+        // ---- Kampf (ab M5) ----
+
+        /// <summary>Wer geschossen hat (beim Schaden und Kill); <see cref="PlayerId"/> ist dann das Opfer.</summary>
+        public byte Attacker;
+
+        /// <summary>Platz der Waffe (siehe weapons.json).</summary>
+        public byte Weapon;
+
+        /// <summary>Getroffene Zone (<see cref="Rig.HitZone"/>) oder <see cref="ExplosionZone"/>.</summary>
+        public byte Zone;
+
+        public byte Amount;
+        public byte Health;
+        public byte Level;
+        public ShotHit Hit;
+        public uint Tick;
+
+        /// <summary>Startpunkt (Schuss, Geschoss) oder Ort der Explosion.</summary>
+        public Vec3 Position;
+
+        /// <summary>Endpunkt eines Schusses oder Anfangsgeschwindigkeit eines Geschosses.</summary>
+        public Vec3 Vector;
+
+        public int ProjectileId;
+
+        /// <summary>Zone bei Schaden durch eine Explosion.</summary>
+        public const byte ExplosionZone = 255;
     }
 
     /// <summary>
@@ -395,6 +529,63 @@ namespace AoS2.Shared.Net
 
         public static void WriteSyncComplete(NetWriter w) => w.WriteByte((byte)WorldEventType.SyncComplete);
 
+        public static void WriteBlockDamaged(NetWriter w, int x, int y, int z, byte level)
+        {
+            w.WriteByte((byte)WorldEventType.BlockDamaged);
+            NetCodec.WriteBlockPos(w, x, y, z);
+            w.WriteByte(level);
+        }
+
+        public static void WritePlayerDamaged(NetWriter w, byte victim, byte attacker, byte weapon, byte zone, byte amount, byte health)
+        {
+            w.WriteByte((byte)WorldEventType.PlayerDamaged);
+            w.WriteByte(victim);
+            w.WriteByte(attacker);
+            w.WriteByte(weapon);
+            w.WriteByte(zone);
+            w.WriteByte(amount);
+            w.WriteByte(health);
+        }
+
+        public static void WritePlayerKilled(NetWriter w, byte victim, byte killer, byte weapon, byte zone)
+        {
+            w.WriteByte((byte)WorldEventType.PlayerKilled);
+            w.WriteByte(victim);
+            w.WriteByte(killer);
+            w.WriteByte(weapon);
+            w.WriteByte(zone);
+        }
+
+        public static void WriteShotFired(NetWriter w, byte shooter, byte weapon, Vec3 from, Vec3 to, ShotHit hit)
+        {
+            w.WriteByte((byte)WorldEventType.ShotFired);
+            w.WriteByte(shooter);
+            w.WriteByte(weapon);
+            NetCodec.WriteVec(w, from);
+            NetCodec.WriteVec(w, to);
+            w.WriteByte((byte)hit);
+        }
+
+        public static void WriteProjectileSpawned(NetWriter w, Projectile p, uint tick)
+        {
+            w.WriteByte((byte)WorldEventType.ProjectileSpawned);
+            w.WriteVarUInt((uint)p.Id);
+            w.WriteByte(p.Weapon);
+            w.WriteByte(p.Owner);
+            w.WriteUInt(tick);
+            NetCodec.WriteVec(w, p.Position);
+            NetCodec.WriteVec(w, p.Velocity);
+        }
+
+        public static void WriteProjectileExploded(NetWriter w, int id, byte weapon, Vec3 position, uint tick)
+        {
+            w.WriteByte((byte)WorldEventType.ProjectileExploded);
+            w.WriteVarUInt((uint)id);
+            w.WriteByte(weapon);
+            w.WriteUInt(tick);
+            NetCodec.WriteVec(w, position);
+        }
+
         /// <summary>Liest alle Ereignisse nach dem Typ-Byte bis zum Ende der Nachricht.</summary>
         public static void Read(NetReader r, List<WorldEvent> into)
         {
@@ -438,6 +629,46 @@ namespace AoS2.Shared.Net
                         e.PlayerId = r.ReadByte();
                         break;
                     case WorldEventType.SyncComplete:
+                        break;
+                    case WorldEventType.BlockDamaged:
+                        NetCodec.ReadBlockPos(r, out e.X, out e.Y, out e.Z);
+                        e.Level = r.ReadByte();
+                        break;
+                    case WorldEventType.PlayerDamaged:
+                        e.PlayerId = r.ReadByte();
+                        e.Attacker = r.ReadByte();
+                        e.Weapon = r.ReadByte();
+                        e.Zone = r.ReadByte();
+                        e.Amount = r.ReadByte();
+                        e.Health = r.ReadByte();
+                        break;
+                    case WorldEventType.PlayerKilled:
+                        e.PlayerId = r.ReadByte();
+                        e.Attacker = r.ReadByte();
+                        e.Weapon = r.ReadByte();
+                        e.Zone = r.ReadByte();
+                        break;
+                    case WorldEventType.ShotFired:
+                        e.PlayerId = r.ReadByte();
+                        e.Weapon = r.ReadByte();
+                        e.Position = NetCodec.ReadVec(r);
+                        e.Vector = NetCodec.ReadVec(r);
+                        e.Hit = (ShotHit)r.ReadByte();
+                        if (e.Hit > ShotHit.Player) throw new ProtocolException("Unbekannte Trefferart.");
+                        break;
+                    case WorldEventType.ProjectileSpawned:
+                        e.ProjectileId = (int)r.ReadVarUInt();
+                        e.Weapon = r.ReadByte();
+                        e.PlayerId = r.ReadByte();
+                        e.Tick = r.ReadUInt();
+                        e.Position = NetCodec.ReadVec(r);
+                        e.Vector = NetCodec.ReadVec(r);
+                        break;
+                    case WorldEventType.ProjectileExploded:
+                        e.ProjectileId = (int)r.ReadVarUInt();
+                        e.Weapon = r.ReadByte();
+                        e.Tick = r.ReadUInt();
+                        e.Position = NetCodec.ReadVec(r);
                         break;
                     default:
                         throw new ProtocolException($"Unbekanntes Ereignis {(byte)e.Type}.");

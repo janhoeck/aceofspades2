@@ -246,7 +246,7 @@ public class NetSerializerTests
         s.Falling.Add(new FallingSnapshot { GroupId = 1234, Fallen = 2.75f });
         var w = new NetWriter();
         s.Write(w);
-        Assert.True(w.Length < 100, $"Snapshot mit 2 Spielern ist {w.Length} Byte groß");
+        Assert.True(w.Length <= Snapshot.HeaderBytes + 2 * Snapshot.MaxPlayerBytes + 9, $"Snapshot mit 2 Spielern ist {w.Length} Byte groß");
 
         var r = ReaderFor(w);
         Assert.Equal(MessageType.Snapshot, (MessageType)r.ReadByte());
