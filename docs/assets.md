@@ -65,8 +65,8 @@ KI-3D-Generatoren erzeugen weiche Meshes, die nicht zum Block-Look passen. Desha
 |---|---|
 | Größe | 16 × 16 px |
 | Format | PNG, RGBA, sRGB |
-| Unity-Import | Filter: Point, Komprimierung: keine, Mipmaps: an |
-| Ablage im Spiel | Werden per Build-Skript zu einem `Texture2DArray` zusammengefasst |
+| Im Spiel | Filter: Point, keine Komprimierung, Mipmaps: an. Kein Unity-Import: Das Spiel baut beim Laden aus den PNGs, die `data/blocks.json` nennt, ein `Texture2DArray` (im Editor direkt aus `assets-src/textures/blocks`, im Build kopiert sie ein Build-Schritt nach `StreamingAssets`) |
+| Blocktyp zuordnen | in `data/blocks.json` unter `textures` (Schlüssel `all`, `side`, `top`, `bottom`; eine Liste = Varianten) |
 | Benennung | `block_<name>[_top\|_side\|_bottom][_v<n>].png` |
 | Varianten | optional 2–4 Varianten pro Block gegen sichtbare Wiederholung |
 | Generator | `node assets-src/tools/gen-block-textures.mjs [ordner] [--vorschau <datei.png>]` erzeugt die prozeduralen Blocktexturen (Standard: `assets-src/textures/blocks/`) – überschreibt gleichnamige PNGs, von Hand nachbearbeitete Texturen danach nicht mehr neu erzeugen |

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Wandelt MagicaVoxel-Dateien (.vox) in Maps (.aos2map) um. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>AoS2.MapConverter</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\libs\AoS2.Shared\AoS2.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AoS2.MapConverter.Tests" />
+  </ItemGroup>
+
+</Project>

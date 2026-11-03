@@ -1,19 +1,16 @@
 using AoS2.Client.Account;
 using AoS2.Shared;
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 namespace AoS2.Client
 {
     /// <summary>
-    /// Platzhalter: zeigt Spiel- und Protokollversion (welche Version hat der Launcher installiert?)
+    /// Zeigt unten rechts Spiel- und Protokollversion (welche Version hat der Launcher installiert?)
     /// und den angemeldeten Spieler. Erzeugt sich beim Start selbst, braucht also nichts in der Szene.
     /// </summary>
     public sealed class VersionDisplay : MonoBehaviour
     {
-        private GUIStyle _titleStyle;
         private GUIStyle _textStyle;
-        private Texture2D _panel;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Create()
@@ -23,37 +20,17 @@ namespace AoS2.Client
             DontDestroyOnLoad(go);
         }
 
-        private void Update()
-        {
-            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
-                Application.Quit();
-        }
-
         private void OnGUI()
         {
-            _titleStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 48, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-            _textStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 22, alignment = TextAnchor.MiddleCenter };
-            if (_panel == null)
-            {
-                _panel = new Texture2D(1, 1);
-                _panel.SetPixel(0, 0, new Color(0.08f, 0.09f, 0.11f, 0.85f));
-                _panel.Apply();
-            }
+            _textStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 14, alignment = TextAnchor.LowerRight };
 
-            // Dunkler Streifen hinter dem Text, sonst ist Weiß auf dem hellen Himmel kaum lesbar.
-            GUI.DrawTexture(new Rect(0, Screen.height / 2f - 110, Screen.width, 250), _panel);
-
-            var center = new Rect(0, Screen.height / 2f - 90, Screen.width, 60);
-            GUI.Label(center, "ACE OF SPADES 2", _titleStyle);
-
-            center.y += 70;
-            GUI.Label(center, $"Version {Application.version}   ·   Protokoll {ProtocolInfo.Version}", _textStyle);
-
-            center.y += 40;
-            GUI.Label(center, AccountText(), _textStyle);
-
-            center.y += 40;
-            GUI.Label(center, "Platzhalter – ESC beendet das Spiel", _textStyle);
+            var text = $"ACE OF SPADES 2  ·  Version {Application.version}  ·  Protokoll {ProtocolInfo.Version}\n{AccountText()}";
+            var rect = new Rect(0, 0, Screen.width - 12, Screen.height - 8);
+            var old = GUI.color;
+            GUI.color = new Color(0, 0, 0, 0.8f);
+            GUI.Label(new Rect(rect.x + 1, rect.y + 1, rect.width, rect.height), text, _textStyle);
+            GUI.color = old;
+            GUI.Label(rect, text, _textStyle);
         }
 
         private static string AccountText()

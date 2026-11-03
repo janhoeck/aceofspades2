@@ -10,6 +10,7 @@ Ein Team-Shooter (Blau gegen Grün) in einer vollständig zerstörbaren, blockar
 - [Architektur](docs/architecture.md) – wie Client, Server, Backend und Launcher zusammenspielen
 - [Assets](docs/assets.md) – Stil, Herstellung und Liste aller Grafiken, Modelle und Sounds
 - [Roadmap](docs/roadmap.md) – Meilensteine
+- [Maps bauen](docs/maps.md) – MagicaVoxel, Zuordnungsdatei, Metadaten, Map-Konverter
 - [Releases und Updates](docs/release.md) – Launcher, Update-Speicher (Cloudflare R2), Release-Workflow
 - [Website, Backend und Discord-Login](docs/backend.md) – Anmeldung, lokal entwickeln, Discord-App, Coolify
 
@@ -46,6 +47,24 @@ dotnet test AoS2.slnx
 ```
 
 Alle Build-Ausgaben landen in `artifacts/`. Den Unity-Client öffnet man über Unity Hub → *Add* → Ordner `client/`.
+
+## Lokal spielen (ohne Server)
+
+Im Unity-Editor die Szene `Assets/Scenes/Game.unity` öffnen und *Play* drücken. Das Spiel lädt `maps/testmap.aos2map`; ins Spielfenster klicken fängt die Maus.
+
+| Taste | Aktion |
+|---|---|
+| W A S D | laufen |
+| Maus | umsehen |
+| Leertaste | springen |
+| Strg (links) | ducken |
+| Shift (links) | sprinten |
+| Linksklick | Block abbauen |
+| Rechtsklick | Block bauen |
+| 1–9, Mausrad | Baublock wählen |
+| Esc | Maus freigeben (im Build zweimal: beenden) |
+
+Blocktypen stehen in `data/blocks.json`, Bewegungswerte in `data/movement.json`; im Editor wirken Änderungen beim nächsten *Play*.
 
 Launcher und Spiel lokal ausprobieren, mit lokaler Website, lokalem Backend und Entwicklungs-Login statt Discord (Details in [docs/backend.md](docs/backend.md#3-lokal-entwickeln) und [docs/release.md](docs/release.md#5-ohne-r2-lokal-testen)):
 

@@ -1,0 +1,25 @@
+{
+  "_comment": "Blocktypen. id: fest (1-255, 0 = Luft), nie neu vergeben. name: stabiler Schlüssel für Maps und Zuordnungsdateien. textures: Dateinamen aus assets-src/textures/blocks ohne .png; Schlüssel all/side/top/bottom (oder posX/negX/posZ/negZ), eine Liste = Varianten. health: Lebenspunkte (ab M5). indestructible: weder abbaubar noch sprengbar. buildable: Spieler können ihn bauen.",
+  "blocks": [
+    { "id": 1, "name": "bedrock", "displayName": "Grundgestein", "health": 0, "indestructible": true,
+      "textures": { "all": "block_bedrock" } },
+    { "id": 2, "name": "stone", "displayName": "Stein", "health": 150,
+      "textures": { "all": ["block_stone", "block_stone_v2"] } },
+    { "id": 3, "name": "dirt", "displayName": "Erde", "health": 60,
+      "textures": { "all": ["block_dirt", "block_dirt_v2"] } },
+    { "id": 4, "name": "grass", "displayName": "Gras", "health": 60,
+      "textures": { "top": ["block_grass_top", "block_grass_top_v2"], "side": "block_grass_side", "bottom": ["block_dirt", "block_dirt_v2"] } },
+    { "id": 5, "name": "asphalt", "displayName": "Asphalt", "health": 200,
+      "textures": { "all": ["block_asphalt", "block_asphalt_v2"] } },
+    { "id": 6, "name": "log", "displayName": "Baumstamm", "health": 100,
+      "textures": { "side": "block_log_side", "top": "block_log_top", "bottom": "block_log_top" } },
+    { "id": 7, "name": "spawn_blue", "displayName": "Spawn-Block Blau", "health": 0, "indestructible": true,
+      "textures": { "all": "block_spawn_blue" } },
+    { "id": 8, "name": "spawn_green", "displayName": "Spawn-Block Grün", "health": 0, "indestructible": true,
+      "textures": { "all": "block_spawn_green" } },
+    { "id": 9, "name": "build_blue", "displayName": "Baublock Blau", "health": 60, "buildable": true,
+      "textures": { "all": "block_build_blue" } },
+    { "id": 10, "name": "build_green", "displayName": "Baublock Grün", "health": 60, "buildable": true,
+      "textures": { "all": "block_build_green" } }
+  ]
+}

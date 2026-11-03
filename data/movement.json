@@ -1,0 +1,15 @@
+{
+  "_comment": "Spielerbewegung (Längen in Blöcken, Zeiten in Sekunden). Die Höhe des Kollisionsquaders kommt aus player_rig.json (stances). Gelesen von AoS2.Shared/Movement/MovementSettings.cs.",
+  "tickRate": 60,
+  "walkSpeed": 4.5,
+  "sprintSpeed": 6.5,
+  "crouchSpeed": 2.2,
+  "groundAcceleration": 60,
+  "airAcceleration": 12,
+  "jumpHeight": 1.25,
+  "gravity": 25,
+  "maxFallSpeed": 40,
+  "stepHeight": 1,
+  "halfWidth": 0.4,
+  "eyeBelowTop": 0.28
+}

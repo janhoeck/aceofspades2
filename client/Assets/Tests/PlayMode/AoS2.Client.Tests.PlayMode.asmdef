@@ -1,0 +1,23 @@
+{
+    "name": "AoS2.Client.Tests.PlayMode",
+    "rootNamespace": "AoS2.Client.Tests",
+    "references": [
+        "AoS2.Client",
+        "AoS2.Shared",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

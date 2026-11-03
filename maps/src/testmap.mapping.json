@@ -1,0 +1,15 @@
+{
+  "_comment": "Palettenfarbe in MagicaVoxel -> Blocktyp aus data/blocks.json. Passend zu gen-testmap.mjs.",
+  "colors": {
+    "#1c1b1e": "bedrock",
+    "#726c65": "stone",
+    "#5a4430": "dirt",
+    "#586c35": "grass",
+    "#353538": "asphalt",
+    "#524030": "log",
+    "#2853bd": "spawn_blue",
+    "#1f9a3d": "spawn_green",
+    "#5a88ea": "build_blue",
+    "#58d074": "build_green"
+  }
+}

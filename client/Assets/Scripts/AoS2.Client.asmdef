@@ -1,0 +1,21 @@
+{
+    "name": "AoS2.Client",
+    "rootNamespace": "AoS2.Client",
+    "references": [
+        "AoS2.Shared",
+        "AoS2.Contracts",
+        "Unity.InputSystem",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -23,7 +23,9 @@ client/*.sln
 client/*.slnx
 client/.vsconfig
 client/.vscode/
-client/Assets/StreamingAssets/data/
+# Kopien aus data/, maps/ und assets-src/ (GameDataBuildStep beim Build)
+client/Assets/StreamingAssets/
+client/Assets/StreamingAssets.meta
 *.pidb.meta
 *.pdb.meta
 *.mdb.meta

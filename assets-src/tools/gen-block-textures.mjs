@@ -28,6 +28,11 @@ const P = {
   leaves: ['1f2c18', '2a3a1f', '354827', '41552f', '4f6338', '5e7343'],
   asphalt: ['1e1e20', '27272a', '2e2e31', '353538', '3d3d40', '47474a'],
   aggregate: ['55534f', '64615b', '73706a'],
+  rock: ['3f3c38', '4b4843', '58544e', '65605a', '726c65', '807970'],
+  bedrock: ['121214', '1c1b1e', '262528', '323033', '403d3d'],
+  // Teamfarben kräftig (Spawn- und Baublöcke heben sich von der gedeckten Umgebung ab)
+  blue: ['142c6b', '1d3f94', '2853bd', '3a6ad8', '5a88ea', '8aaef5'],
+  green: ['0f5a22', '177a2f', '1f9a3d', '2fb851', '58d074', '8fe5a2'],
 };
 
 // ---- Hilfsfunktionen ----
@@ -233,6 +238,71 @@ function asphalt(seed) {
   return im;
 }
 
+// Bruchstein: grobe Flecken mit dunklen Rissen
+function stone(seed) {
+  const r = rng(seed), im = img();
+  paint(im, quantize(field(r, [[0.45, 4], [0.3, 8], [0.25, 0]]), [0.05, 0.15, 0.3, 0.28, 0.16, 0.06]), P.rock);
+  // Risse: kurze, zufällig abknickende Linien mit heller Kante darüber
+  for (let i = 0; i < 3; i++) {
+    let x = (r() * N) | 0, y = (r() * N) | 0;
+    const len = 3 + ((r() * 4) | 0);
+    for (let k = 0; k < len; k++) {
+      set(im, x, y, P.rock[0]);
+      set(im, x, y - 1, P.rock[4]);
+      if (r() < 0.5) x++;
+      else y++;
+    }
+  }
+  return im;
+}
+
+// Grundgestein: fast schwarz mit harten Kontrasten, damit man den Boden der Map sofort erkennt
+function bedrock(seed) {
+  const r = rng(seed), im = img();
+  paint(im, quantize(field(r, [[0.5, 4], [0.2, 8], [0.3, 0]]), [0.2, 0.25, 0.25, 0.2, 0.1]), P.bedrock);
+  return im;
+}
+
+// Spawn-Block: Metallplatte in Teamfarbe mit Fase und Nieten. Blau mit Streifen, Grün mit Raute,
+// damit man die Teams auch ohne Farbsehen unterscheidet
+function spawn(ramp, symbol) {
+  return seed => {
+    const r = rng(seed), im = img();
+    paint(im, quantize(field(r, [[0.3, 4], [0.7, 0]]), [0.3, 0.4, 0.3]), ramp.slice(2, 5));
+    for (let i = 0; i < N; i++) {
+      set(im, i, 0, ramp[5]);
+      set(im, 0, i, ramp[5]); // Lichtkante oben/links
+      set(im, i, N - 1, ramp[0]);
+      set(im, N - 1, i, ramp[0]); // Schatten unten/rechts
+    }
+    for (const [x, y] of [[2, 2], [12, 2], [2, 12], [12, 12]]) {
+      set(im, x, y, ramp[5]);
+      set(im, x + 1, y + 1, ramp[0]);
+    }
+    for (let y = 4; y < 12; y++) {
+      for (let x = 4; x < 12; x++) {
+        const on = symbol === 'stripes' ? (x + y) % 4 < 2 : Math.abs(x - 7.5) + Math.abs(y - 7.5) < 4;
+        if (on) set(im, x, y, ramp[1]);
+      }
+    }
+    return im;
+  };
+}
+
+// Baublock: Kiste aus Brettern in Teamfarbe (heller als der Spawn-Block)
+function build(ramp) {
+  return seed => {
+    const r = rng(seed), im = img();
+    paint(im, quantize(field(r, [[0.35, 8, 2], [0.65, 0]]), [0.2, 0.45, 0.35]), ramp.slice(3, 6));
+    for (let x = 0; x < N; x++) {
+      for (const y of [0, 5, 10]) set(im, x, y, ramp[1]); // Fugen zwischen den Brettern
+      for (const y of [1, 6, 11]) if (r() < 0.7) set(im, x, y, ramp[5]);
+    }
+    for (const [x, y] of [[2, 2], [13, 2], [2, 7], [13, 7], [2, 12], [13, 12]]) set(im, x, y, ramp[0]); // Nägel
+    return im;
+  };
+}
+
 // Dateiname -> [Generator, Zufallswert]
 const TEXTURES = {
   block_dirt: [dirt, 11],
@@ -245,6 +315,13 @@ const TEXTURES = {
   block_leaves: [leaves, 51],
   block_asphalt: [asphalt, 61],
   block_asphalt_v2: [asphalt, 62],
+  block_stone: [stone, 71],
+  block_stone_v2: [stone, 72],
+  block_bedrock: [bedrock, 81],
+  block_spawn_blue: [spawn(P.blue, 'stripes'), 91],
+  block_spawn_green: [spawn(P.green, 'diamond'), 92],
+  block_build_blue: [build(P.blue), 101],
+  block_build_green: [build(P.green), 102],
 };
 
 // ---- PNG schreiben ----
