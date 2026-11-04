@@ -109,4 +109,28 @@ namespace AoS2.Shared.Net
             return request;
         }
     }
+
+    /// <summary>
+    /// Klassenwunsch des Clients (zuverlässig), ID aus classes.json (1 …). Gilt ab dem nächsten Spawn: Wer lebt, behält bis
+    /// zum nächsten Tod seine Klasse; wer zuschaut oder tot ist, erscheint mit der neuen. Ob die ID gültig ist, prüft der
+    /// Server mit seinen Klassen. Die aktive Klasse steht im Snapshot.
+    /// </summary>
+    public struct ClassSelectRequest
+    {
+        public byte Class;
+
+        public void Write(NetWriter w)
+        {
+            w.WriteByte((byte)MessageType.ClassSelect);
+            w.WriteByte(Class);
+        }
+
+        public static ClassSelectRequest Read(NetReader r)
+        {
+            var request = new ClassSelectRequest { Class = r.ReadByte() };
+            if (request.Class < 1 || request.Class > Combat.PlayerClasses.MaxClasses) throw new ProtocolException($"Ungültige Klasse {request.Class}.");
+            r.ExpectEnd();
+            return request;
+        }
+    }
 }

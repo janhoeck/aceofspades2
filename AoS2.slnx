@@ -22,6 +22,8 @@
     <Project Path="server/AoS2.Server/AoS2.Server.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/AoS2.Balance.Tests/AoS2.Balance.Tests.csproj" />
+    <Project Path="tools/AoS2.Balance/AoS2.Balance.csproj" />
     <Project Path="tools/AoS2.LoadTest/AoS2.LoadTest.csproj" />
     <Project Path="tools/AoS2.ManifestBuilder.Tests/AoS2.ManifestBuilder.Tests.csproj" />
     <Project Path="tools/AoS2.ManifestBuilder/AoS2.ManifestBuilder.csproj" />

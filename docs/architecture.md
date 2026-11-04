@@ -75,7 +75,7 @@ aceofspades2/
 │  ├─ AoS2.ManifestBuilder/    Erzeugt das Update-Manifest
 │  ├─ AoS2.ManifestBuilder.Tests/
 │  └─ release/                 Release-Skripte: Unity-Build, Upload, Velopack
-├─ data/                       blocks.json, movement.json, player_rig.json, combat.json, weapons.json (classes.json ab M8)
+├─ data/                       blocks.json, movement.json, player_rig.json, combat.json, weapons.json, classes.json
 ├─ maps/                       Map-Quellen und gebaute Maps
 ├─ assets-src/                 Quelldateien der Assets (siehe docs/assets.md)
 ├─ deploy/                     Docker-/Compose-Dateien für Coolify
@@ -97,6 +97,8 @@ aceofspades2/
 ### Spieldaten (`data/`)
 
 Block-, Klassen- und Waffen-Definitionen liegen als JSON in `data/`. Der Server liest sie direkt, der Client bekommt sie beim Build nach `StreamingAssets` kopiert. Der Server ist maßgeblich – der Client nutzt die Daten nur für Anzeige und Vorhersage.
+
+**Seit M8 schickt der Server seine Spielregeln beim Beitritt** (`movement.json`, `combat.json`, `weapons.json`, `classes.json` als Text, Nachricht `GameData` vor der Begrüßung). Der Client rechnet ab dann mit diesen statt mit seinen eigenen Dateien (`GameRules` in `AoS2.Shared/GameRules.cs`). So stimmen Vorhersage (Munition, Feuerrate, Tempo, Kollisionshöhe) und Anzeige auch dann, wenn ein Betreiber Werte geändert hat; fürs Balancing reicht ein Neustart des Servers. Blöcke, Spielermodell und Maps bleiben im Spiel (Texturen und Modell müssen dazu passen, die Map wird per Prüfsumme verglichen). Sind die Regeln des Servers ungültig, trennt der Client mit der Meldung des Parsers.
 
 ## 3. Netzwerk
 
@@ -154,17 +156,17 @@ Ziel: Die Trefferzonen passen **immer exakt** zum sichtbaren Modell und seiner a
 - **Animationszustand ist Spielzustand:** Welche Animation läuft, seit wann und wie sie überblendet wird, folgt fest aus Werten, die der Server ohnehin kennt (Haltung, Geschwindigkeit, am Boden/in der Luft, Zeitpunkt des Wechsels, Blickwinkel). Keine Zufallswerte, keine nur im Client bekannten Effekte an Knochen mit Trefferboxen.
 - **Lag-Ausgleich spult auch die Pose zurück:** Der Server speichert pro Tick den Animationszustand jedes Spielers und prüft einen Schuss gegen die Pose, die der Schütze gesehen hat.
 - **Prüfung des Schusses:** Strahl gegen gedrehte Quader (OBB) der Trefferboxen des Gegners, zuerst grob gegen eine umschließende Kugel.
-- **Bewegungs-Kollision** mit der Welt bleibt ein einfacher Quader (sonst ruckelt die Bewegung an Kanten). Seine Höhe je Haltung kommt ebenfalls aus dem Modell (`stances` in `player_rig.json`): z. B. geduckt ca. 1,47 Blöcke, mit Helm ca. 1,55.
+- **Bewegungs-Kollision** mit der Welt bleibt ein einfacher Quader (sonst ruckelt die Bewegung an Kanten). Seine Höhe je Haltung kommt ebenfalls aus dem Modell (`stances` in `player_rig.json`): z. B. geduckt ca. 1,47 Blöcke, mit Helm ca. 1,55. Seit M8 rechnet jeder Spieler mit der Höhe seiner Klasse (`PlayerClass.Movement`, Client und Server gleich).
 - **Umsetzung (seit M5):** `AoS2.Shared/Rig` – `PlayerRig` liest `player_rig.json`, `PlayerAnimator` führt den Animationszustand (`AnimationState`: Animation, Start-Tick, vorige Animation, Überblendung über 8 Ticks), `PlayerPose` rechnet die Knochenmatrizen und die Trefferboxen in der Welt, `Combat/Geometry` prüft Strahl gegen Kugel und OBB. Getestet gegen die Werte, die `export-rig.mjs --check` direkt aus den Blockbench-Keyframes rechnet.
 - **Feste Regeln zusätzlich zu den Blockbench-Animationen:** Der Kopf neigt sich mit dem Blick (75 %, höchstens 60°). Mit einer Waffe in der Hand zeigen beide Arme in Blickrichtung (Zielhaltung, gleicht eine Neigung des Körpers aus). Beides rechnet `PlayerPose` auf beiden Seiten gleich. Eine Zielhaltung aus Blockbench kann sie später ersetzen.
 - **Modell und Welt:** Blockbench rechnet rechtshändig mit Blick nach −z, Unity linkshändig mit Blick nach +z. Der Übergang ist eine Spiegelung von z, nicht eine halbe Drehung (sonst wäre der rechte Arm links): `PlayerPose.ModelToWorld`. Der Client baut das sichtbare Modell aus denselben Würfeln (`player_rig.json` enthält dafür auch die Texturkoordinaten jeder Seite) und setzt die Knochen jedes Bild aus der `PlayerPose`.
 - **Schadensfaktoren je Zone** (Entscheidung M5, `data/combat.json`): Kopf ×2, Rumpf ×1, Arme ×0,67, Beine ×0,67 (wie das Original: ein Kopfschuss mit 50 Grundschaden tötet). Gilt für Hitscan-Treffer; Explosionen zählen ohne Zone.
 - **Waffe in der Hand** hat keine Trefferzone (Entscheidung M5): Sie wird im Client an die rechte Hand gehängt, ist aber kein Würfel des Spielermodells.
-- **Offen:** Zählen dünne Ausrüstungsteile (Klassen ab M8) als Treffer? In M5 trägt niemand Ausrüstung (Klasse „none“).
+- **Ausrüstung (Entscheidung M8):** Sichtbares Modell (`PlayerModel.Create(…, gearClass)`) und Trefferboxen (`PlayerPose.Raycast(…, gearClass, …)`) enthalten den Grundkörper plus genau die Würfel mit `gear` = Ausrüstung der Klasse (`PlayerPose.IsWorn`). Jedes Teil zählt mit der Zone, die `export-rig.mjs` ihm gibt (Helm Kopf, Rucksack Rumpf, Schulterpolster Arm). Würfel, die in einer Richtung dünner als `minHitboxPixels` sind (combat.json, 1 px), sind nur Optik (`PlayerPose.IsHittable`): die Antenne und der Knopf am Funkgerät des Recon. Beim Lag-Ausgleich nimmt der Server die Klasse aus dem zurückgespulten Snapshot, also die, die der Schütze gesehen hat.
 
 ### Kampf (seit M5)
 
-Werte stehen in `data/combat.json` (Leben, Respawn-Zeit, Selbstschaden, Zonenfaktoren, Wechselzeit, wie weit der Lag-Ausgleich zurückspult) und `data/weapons.json` (Waffen in Platz-Reihenfolge; Platz 1 ist immer der Spaten). Client und Server lesen dieselben Dateien (`CombatSettings`).
+Werte stehen in `data/combat.json` (Leben, Respawn-Zeit, Selbstschaden, Zonenfaktoren, Wechselzeit, wie weit der Lag-Ausgleich zurückspult, dünnste Trefferbox) und `data/weapons.json` (alle Waffen; die Stelle in der Datei ist die Waffen-ID). Welche Waffe auf welchem Platz liegt, bestimmt seit M8 die Klasse (`data/classes.json`, Abschnitt Klassen). Client und Server lesen dieselben Dateien (`CombatSettings`, `PlayerClasses`).
 
 | Teil | Wo | Aufgabe |
 |---|---|---|
@@ -216,6 +218,28 @@ Ohne Spieler in Teams steht die Uhr des Zeitlimits (ein leerer Server spielt kei
 
 **Protokollversion 3** (M6): neue Nachricht und neue Ereignisse, `Team` als Byte (0 = keins, 1 = Blau, 2 = Grün).
 
+### Klassen (seit M8)
+
+| Teil | Wo | Aufgabe |
+|---|---|---|
+| Daten | `data/classes.json`, `data/weapons.json` | Klassen (Waffen je Platz, Blöcke, Grab-Pause, Tempo, Ausrüstung, Leben), alle Waffen mit Werten |
+| Regeln | `AoS2.Shared/Combat/PlayerClasses.cs` (`PlayerClass`, `PlayerClasses`), `GameRules.cs` | Lesen und Prüfen (ungültige Daten: `FormatException` mit Datei, Klasse/Waffe und Grund), Bewegung je Klasse (Tempo-Faktor, Höhe aus `stances`) |
+| Waffen | `WeaponSim.Step(…, PlayerClass, …)`, `WeaponState.Full(PlayerClass)` | Plätze 1 … 4 der Klasse (0 = Spaten), Munition je Platz |
+| Balancing | `AoS2.Shared/Combat/BalanceMath.cs`, `tools/AoS2.Balance` | Treffer und Zeit bis zum Tod, Tabelle `docs/balancing.md` |
+| Server | `ServerPlayer.Class`/`NextClass`/`Blocks`, `Match.SelectClass`, `Match.Respawn` | Klassenwunsch, Wechsel beim Respawn, Blockvorrat, Grab-Pause je Klasse, Trefferzonen mit Ausrüstung |
+| Protokoll | `ClassSelectRequest` (Client → Server), `GameData`, `Snapshot.OwnClass`, `PlayerSnapshot.Class`, `EditResult` mit Vorrat, Ereignis `BlockSupply` (18) | siehe unten |
+| Client | `ClientSession` (`Class`, `NextClass`, `RequestClass`, `BlocksLeft`, `ClassOf`), Unity: `GameClient` (Menü), `Hud`, `RemotePlayersView`, `PlayerModel`, `WeaponView`, `LocalPlayer` (Zielfernrohr) | Anzeige und Vorhersage |
+
+**Ablauf, Schritt für Schritt:**
+1. Beim Beitritt schickt der Server `GameData`, der Client liest daraus die Klassen und Waffen des Servers.
+2. Im Menü wählt der Spieler eine Klasse: `ClassSelectRequest` (zuverlässig, ID = Stelle in classes.json). Der Server merkt sie als `NextClass`. Eine unbekannte ID ist ein Protokollfehler.
+3. Beim Spawn (`Respawn`: Teamwahl als Zuschauer, Respawn nach dem Tod, Neustart des Matches) wird `NextClass` aktiv, sonst die Standardklasse. Leben, Munition und Blockvorrat kommen aus der Klasse; der Vorrat geht als `BlockSupply` an den Spieler.
+4. Die aktive Klasse steht im Snapshot: für den Empfänger als `OwnClass` (die Vorhersage rechnet ab der bestätigten Eingabe mit ihr, so passt sie sich beim Respawn ohne Korrektur an), für andere Spieler in drei Bits der Spieler-Flags (der Snapshot wird nicht größer). Der Server merkt sie im Verlauf für den Lag-Ausgleich mit.
+5. **Blockvorrat:** Der Server prüft beim Bauen `Blocks > 0` (sonst `NoBlocks`), zieht einen ab und gibt beim Abbauen einen zurück (höchstens `PlayerClass.Blocks`). Jede Antwort `EditResult` trägt den neuen Vorrat. Der Client zeigt `BlocksLeft` = letzter Stand vom Server, verrechnet mit seinen noch unbeantworteten Blockaktionen; weil Änderung, Antwort und `BlockSupply` über denselben geordneten Kanal kommen, springt die Anzeige nicht.
+6. **Waffen-IDs:** Ereignisse (`PlayerDamaged`, `PlayerKilled`, `ShotFired`, `ProjectileSpawned`, `ProjectileExploded`) tragen die Waffen-ID, nicht den Platz: Ein Platz bedeutet je Klasse eine andere Waffe. In Eingabe, Waffenzustand und `PlayerSnapshot.Weapon` steht weiter der Platz.
+
+**Protokollversion 4** (M8): `ClassSelect` (4) und `GameData` (13) neu, `OwnClass` im Snapshot, Klasse in den Spieler-Flags, Vorrat in `EditResult`, Ereignis `BlockSupply`, Waffen-ID statt Platz in den Ereignissen, `BlockEditResult.NoBlocks`.
+
 **Last (gemessen mit `tools/AoS2.LoadTest`: Bots über UDP auf localhost, Server im selben Prozess, Release-Build, Entwicklungsrechner, je 20 s):**
 
 | Spieler | Tick-Rate | Rechenzeit pro Tick Ø / 99 % / max | Snapshot Ø / max | Download pro Client | Upload Server gesamt |
@@ -261,7 +285,7 @@ Der Client zeigt Abbauen und Bauen vorab an und nimmt die Änderung wieder weg, 
 
 **Blockschaden (seit M5):** Kugeln (`blockDamage` je Treffer) und Explosionen ziehen Lebenspunkte ab (`health` in `blocks.json`). Gespeichert wird nur für beschädigte Blöcke (`BlockDamage`); ändert sich ein Block, ist sein Schaden vergessen. Clients bekommen den Schaden als Stufe 1 … 255 und zeigen vier Stufen Risse. Wer später beitritt, bekommt alle beschädigten Blöcke mit. Zerstörte Blöcke verschwinden wie beim Abbauen und können Gruppen fallen lassen.
 
-Die Regeln (Reichweite 5 Blöcke, 0,2 s Pause, unzerstörbare Blöcke, nicht in den eigenen Quader bauen) stehen in `AoS2.Shared/Voxels/BlockEditing.cs`. Client (vorab) und Server (verbindlich) prüfen dieselben Regeln; nur der Server prüft zusätzlich Sichtlinie, Pause und andere Spieler im Weg. Seit M6 gehören die Zonen dazu (`ProtectedZone`, Abschnitt 5) und nach dem Matchende `MatchOver`. Ein Blockvorrat ist noch offen.
+Die Regeln (Reichweite 5 Blöcke, 0,2 s Pause, unzerstörbare Blöcke, nicht in den eigenen Quader bauen) stehen in `AoS2.Shared/Voxels/BlockEditing.cs`. Client (vorab) und Server (verbindlich) prüfen dieselben Regeln; nur der Server prüft zusätzlich Sichtlinie, Pause und andere Spieler im Weg. Seit M6 gehören die Zonen dazu (`ProtectedZone`, Abschnitt 5) und nach dem Matchende `MatchOver`. Seit M8 kommt die Pause aus der Klasse (Miner 0,1 s) und es gibt einen **Blockvorrat** je Klasse (`NoBlocks`, Abschnitt 3, Klassen).
 
 ### Fallende Blöcke
 

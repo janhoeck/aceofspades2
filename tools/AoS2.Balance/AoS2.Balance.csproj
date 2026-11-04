@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Balancing-Tabelle: Treffer und Zeit bis zum Tod je Waffe, Zone und Entfernung aus data/*.json. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>AoS2.Balance</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\libs\AoS2.Shared\AoS2.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AoS2.Balance.Tests" />
+  </ItemGroup>
+
+</Project>

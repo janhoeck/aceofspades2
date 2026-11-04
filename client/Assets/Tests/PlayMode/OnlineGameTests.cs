@@ -36,6 +36,7 @@ namespace AoS2.Client.Tests
         private double _otherNextTick;
         private PlayerInput _otherInput;
         private Team _otherTeam;
+        private string _otherClass;
         private bool _otherTeamRequested;
         private string _config;
 
@@ -214,8 +215,8 @@ namespace AoS2.Client.Tests
             Assert.AreEqual(0, _game.RemotePlayers.Avatars.Count(), "Tote werden ausgeblendet");
             yield return Screenshot("m5-kill");
 
-            // Granate zur Probe: fliegt sichtbar und explodiert (Effekte ohne Fehler)
-            _game.Player.TestSelectSlot(2);
+            // Granate zur Probe: fliegt sichtbar und explodiert (Effekte ohne Fehler). Assault: Platz 4 (Taste 4).
+            _game.Player.TestSelectSlot(3);
             yield return Run(0.5f);
             _game.Player.TestLook(_game.Player.Yaw, 30);
             _game.Player.TestFire(true);
@@ -302,6 +303,77 @@ namespace AoS2.Client.Tests
             Assert.AreEqual(Team.Blue, _game.Session.Team, "Teams bleiben");
         }
 
+        /// <summary>
+        /// M8, Klassen: Der zweite Client (Grün) wählt vor dem Spawn den Rocketeer, die Spielszene zeigt ihn mit dessen
+        /// Ausrüstung. Der Unity-Spieler (Assault) wählt im Menü den Recon: Er bleibt Assault, bis er stirbt (hier durch die
+        /// eigene Granate), und erscheint dann als Recon mit Scharfschützengewehr und Zielfernrohr.
+        /// Bild: artifacts/screenshots/m8-rocketeer.png.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Online_ClassChoice_GearWeaponsAndRespawnRule()
+        {
+            ConnectOtherClient(Team.Green, "rocketeer");
+            yield return WaitForOther();
+            Assert.AreEqual("rocketeer", _other.Class.Name, "zweiter Client spawnt mit der gewählten Klasse");
+            Assert.AreEqual("rocketeer", _game.Session.ClassOf(_other.PlayerId).Name);
+            Assert.AreEqual("rocketeer", _game.RemotePlayers.ShownGear(_other.PlayerId), "Modell mit Rocketeer-Ausrüstung");
+            var rocketeerBoxes = _game.Rig.Boxes.Count(b => b.Gear == null || b.Gear == "rocketeer");
+            Assert.AreEqual(rocketeerBoxes, _game.RemotePlayers.Model(_other.PlayerId).BoxCount, "genau die Würfel, die der Server prüft");
+            Assert.AreEqual(1.982f, _other.Movement.StandHeight, 0.001f, "Kollisionshöhe mit Raketenhelm");
+
+            // Beide gehen aus dem Spawn, der andere schaut den Unity-Spieler an, mit dem Raketenwerfer in der Hand (Bild).
+            yield return MeetInTheMiddle();
+            var me = _game.Player.State.Position;
+            var him = _other.Prediction.State.Position;
+            _otherInput = new PlayerInput { Weapon = 1, Yaw = Mathf.Repeat(Mathf.Atan2(me.X - him.X, me.Z - him.Z) * Mathf.Rad2Deg, 360) };
+            AimAtOther(20f / 16);
+            yield return Run(0.8f);
+            yield return Screenshot("m8-rocketeer");
+
+            // Klassenwahl im Menü: Der Unity-Spieler lebt, also gilt die neue Klasse erst beim nächsten Spawn.
+            Assert.AreEqual("assault", _game.Session.Class.Name);
+            _game.OpenClassMenu();
+            Assert.IsTrue(_game.TeamMenuOpen && _game.ClassMenuOnly, "K öffnet die Klassenwahl");
+            _game.ChooseClass(_game.Session.Classes.Find("recon"));
+            Assert.IsFalse(_game.TeamMenuOpen, "Menü schließt nach der Wahl");
+            yield return Run(0.5f);
+            Assert.AreEqual("assault", _game.Session.Class.Name, "bleibt bis zum nächsten Spawn");
+            Assert.AreEqual("recon", _game.MenuClass.Name);
+
+            // Granate vor die eigenen Füße (Assault: Platz 4): Nach 3 s tot, nach weiteren 5 s wieder da, jetzt als Recon.
+            _otherInput = default;
+            _game.Player.TestSelectSlot(3);
+            yield return Run(0.6f);
+            _game.Player.TestLook(_game.Player.Yaw, 89);
+            _game.Player.TestFire(true);
+            yield return Run(0.1f);
+            _game.Player.TestFire(false);
+            var timeout = Time.realtimeSinceStartup + 5f;
+            while (_game.Session.Alive && Time.realtimeSinceStartup < timeout) yield return Run(0.1f);
+            Assert.IsFalse(_game.Session.Alive, "von der eigenen Granate erwischt");
+            Assert.AreEqual("assault", _game.Session.Class.Name, "tot, aber noch nicht wieder da");
+            timeout = Time.realtimeSinceStartup + 8f;
+            while (!_game.Session.Alive && Time.realtimeSinceStartup < timeout) yield return Run(0.1f);
+            Assert.IsTrue(_game.Session.Alive, "wieder da");
+            yield return Run(0.3f);
+            Assert.AreEqual("recon", _game.Session.Class.Name);
+            Assert.AreEqual(_game.Session.Classes.Find("recon").Movement.SprintSpeed, _game.Movement.SprintSpeed, "Recon läuft schneller");
+            Assert.AreEqual("recon", _other.ClassOf(_game.Session.PlayerId).Name, "der andere sieht die neue Klasse");
+            Assert.AreEqual(30, _game.Session.BlocksLeft);
+
+            _game.Player.TestSelectSlot(1);
+            yield return Run(0.5f);
+            Assert.AreEqual("sniper", _game.Player.Weapon.Name);
+            Assert.AreEqual(5, _game.Session.Prediction.Weapons.GetAmmo(1).Magazine);
+            _game.Player.TestAim(true);
+            yield return Run(0.5f);
+            Assert.IsTrue(_game.Player.Zoomed);
+            Assert.Less(Camera.main.fieldOfView, 30f, "Zielfernrohr vergrößert (Sichtfeld kleiner)");
+            _game.Player.TestAim(false);
+            yield return Run(0.5f);
+            Assert.Greater(Camera.main.fieldOfView, 70f);
+        }
+
         /// <summary>Blick auf den anderen Spieler, so wie die Spielszene ihn gerade zeigt (Höhe über den Füßen in Blöcken).</summary>
         private void AimAtOther(float height)
         {
@@ -355,16 +427,18 @@ namespace AoS2.Client.Tests
             yield return Run(0.3f);
         }
 
-        private void ConnectOtherClient(Team team)
+        /// <param name="cls">Klasse, die der zweite Client vor dem Spawn wählt (<c>null</c> = keine, also die Standardklasse).</param>
+        private void ConnectOtherClient(Team team, string cls = null)
         {
             _otherTeam = team;
+            _otherClass = cls;
             _otherTeamRequested = false;
             _otherInput = default;
             var registry = _game.Registry;
             _otherNet = new NetClient();
-            _other = new ClientSession(registry, _game.Movement,
+            _other = new ClientSession(registry, _game.Rules, File.ReadAllText(GameDataPaths.DataFile("player_rig.json")),
                 name => File.ReadAllBytes(Path.Combine(GameDataPaths.MapsFolder, name + MapFile.Extension)),
-                _otherNet, () => Time.realtimeSinceStartupAsDouble, _game.Combat);
+                _otherNet, () => Time.realtimeSinceStartupAsDouble);
             _otherNet.Session = _other;
             ServerAddress.TryParse("127.0.0.1:" + _port, out var address);
             _otherNet.Connect(address, DevJoinTicket.Create(Guid.NewGuid(), "Zweiter", DateTimeOffset.UtcNow));
@@ -377,6 +451,7 @@ namespace AoS2.Client.Tests
             _other.Update();
             if (_other.Phase == ClientPhase.Playing && !_otherTeamRequested)
             {
+                if (_otherClass != null) _other.RequestClass(_other.Classes.Find(_otherClass));
                 _other.RequestTeam(_otherTeam);
                 _otherTeamRequested = true;
             }

@@ -28,6 +28,9 @@ namespace AoS2.Shared.Voxels
 
         /// <summary>Server: Das Match ist vorbei, bis zum Neustart ändert sich nichts.</summary>
         MatchOver,
+
+        /// <summary>Der Blockvorrat ist leer (abbauen füllt ihn wieder auf, der Respawn ganz).</summary>
+        NoBlocks,
     }
 
     /// <summary>
@@ -39,7 +42,10 @@ namespace AoS2.Shared.Voxels
         /// <summary>Maximale Entfernung vom Auge bis zum Block (in Blöcken).</summary>
         public const float Reach = 5f;
 
-        /// <summary>Mindestabstand zwischen zwei Aktionen in Ticks (12 Ticks = 0,2 s bei 60 Ticks/s).</summary>
+        /// <summary>
+        /// Mindestabstand zwischen zwei Aktionen in Ticks (12 Ticks = 0,2 s bei 60 Ticks/s), wenn die Klasse nichts anderes sagt
+        /// (<c>editSeconds</c> in classes.json, <see cref="Combat.PlayerClass.EditCooldownTicks"/>).
+        /// </summary>
         public const int CooldownTicks = 12;
 
         /// <param name="zones">Zonen der Map; <c>null</c> = keine (überall erlaubt).</param>

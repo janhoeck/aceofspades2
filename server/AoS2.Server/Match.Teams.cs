@@ -119,15 +119,40 @@ public sealed partial class Match
 
     // ---- Spawn ----
 
-    /// <summary>Setzt den Spieler an den nächsten Spawnpunkt seines Teams, mit vollem Leben und voller Munition.</summary>
+    /// <summary>
+    /// Setzt den Spieler an den nächsten Spawnpunkt seines Teams, mit vollem Leben, voller Munition und vollem Blockvorrat.
+    /// Hier wird auch eine neu gewählte Klasse aktiv (Regel: Klassenwechsel beim nächsten Respawn).
+    /// </summary>
     private void Respawn(ServerPlayer p)
     {
+        var cls = p.NextClass ?? _content.Classes.Default;
+        if (cls != p.Class)
+        {
+            _log.LogInformation("{Name} spielt jetzt {Class}", p.Name, cls.DisplayName);
+            p.Class = cls;
+        }
         p.State = new PlayerState { Position = Spawns.Pick(World, Metadata, p.Team, _spawnCounters[(int)p.Team]++) };
         p.Remember(p.LastProcessedTick, p.State, p.LastInput); // Blockaktionen ab jetzt vom Spawn aus prüfen
-        p.Health = _content.Combat.Health;
-        p.WeaponsState = WeaponState.Full(_content.Combat, p.WeaponsState.Slot);
+        p.Health = cls.Health;
+        p.WeaponsState = WeaponState.Full(cls, p.WeaponsState.Slot);
+        p.Blocks = cls.Blocks;
         p.AnimationState = PlayerAnimator.Start(_content.Rig, Tick);
         p.Life++;
+        BeginEvent(p.Id);
+        WorldEvents.WriteBlockSupply(_events[p.Id], p.Blocks);
+    }
+
+    // ---- Klassen ----
+
+    /// <summary>
+    /// Klassenwunsch. Die Klasse gilt ab dem nächsten Spawn: Wer zuschaut oder tot ist, erscheint mit ihr; wer lebt, behält
+    /// seine bis zum nächsten Tod (sonst könnte man durch einen Wechsel Munition und Leben auffüllen).
+    /// </summary>
+    public void SelectClass(ServerPlayer p, PlayerClass cls)
+    {
+        if (p.NextClass == cls) return;
+        p.NextClass = cls;
+        _log.LogDebug("{Name} wählt {Class} für den nächsten Spawn", p.Name, cls.DisplayName);
     }
 
     // ---- Punkte, Matchende, Neustart ----
@@ -203,7 +228,7 @@ public sealed partial class Match
             foreach (var edit in p.Edits)
             {
                 BeginEvent(p.Id);
-                WorldEvents.WriteEditResult(_events[p.Id], edit.Request.Seq, BlockEditResult.MatchOver);
+                WorldEvents.WriteEditResult(_events[p.Id], edit.Request.Seq, BlockEditResult.MatchOver, p.Blocks);
             }
             p.Edits.Clear();
             if (p.Team != Team.None) Respawn(p);

@@ -10,6 +10,7 @@ Ein Team-Shooter (Blau gegen Grün) in einer vollständig zerstörbaren, blockar
 - [Architektur](docs/architecture.md) – wie Client, Server, Backend und Launcher zusammenspielen
 - [Assets](docs/assets.md) – Stil, Herstellung und Liste aller Grafiken, Modelle und Sounds
 - [Roadmap](docs/roadmap.md) – Meilensteine
+- [Balancing-Tabelle](docs/balancing.md) – Treffer und Zeit bis zum Tod je Waffe, Zone und Entfernung (erzeugt aus `data/`)
 - [Maps bauen](docs/maps.md) – MagicaVoxel, Zuordnungsdatei, Metadaten, Map-Konverter
 - [Releases und Updates](docs/release.md) – Launcher, Update-Speicher (Cloudflare R2), Release-Workflow
 - [Website, Backend und Discord-Login](docs/backend.md) – Anmeldung, lokal entwickeln, Discord-App, Coolify
@@ -26,7 +27,7 @@ Ein Team-Shooter (Blau gegen Grün) in einer vollständig zerstörbaren, blockar
 | `backend/` | Web-API: Discord-Login, Accounts, Server-Browser |
 | `launcher/` | Launcher mit Auto-Update |
 | `libs/` | Gemeinsamer Code (Client + Server) |
-| `tools/` | Map-Konverter, Manifest-Builder |
+| `tools/` | Map-Konverter, Manifest-Builder, Lasttest, Balancing-Tabelle |
 | `data/` | Blöcke, Klassen, Waffen als JSON |
 | `maps/` | Maps |
 | `assets-src/` | Quelldateien der Assets (Texturen, Modelle, Sounds) |
@@ -77,9 +78,9 @@ dotnet run --project server/AoS2.Server -- --dev   # Server im Entwicklungsmodus
 
 Dann im Editor *Play* und im Startmenü unter **Direkt verbinden** mit `127.0.0.1:32887` und Haken bei **Entwicklungs-Ticket** verbinden (der Reiter **Server-Browser** zeigt die öffentlichen Server mit Ping, wenn das Spiel über den Launcher läuft); ein Windows-Build (*AoS2 → Windows-Build erstellen*) ist der zweite Client. Ausführlich: [docs/server.md](docs/server.md).
 
-Nach dem Verbinden wählt man im **Team-Menü** Blau, Grün oder Automatisch; gespielt wird Team Deathmatch bis 50 Punkte. **M** öffnet das Team-Menü wieder, **Tab** zeigt die Punktetabelle. Server-Einstellungen (Punkteziel, Spieler pro Team, Zeitlimit, Teambeschuss) stehen in einer Config-Datei, Vorlage: `server/AoS2.Server/server.example.json`. Ausprobieren: [docs/server.md](docs/server.md#16-team-deathmatch-ausprobieren-seit-m6).
+Nach dem Verbinden wählt man im Menü eine **Klasse** (Miner, Assault, Recon, Rocketeer) und ein **Team** (Blau, Grün oder Automatisch); gespielt wird Team Deathmatch bis 50 Punkte. **M** öffnet das Menü wieder, **K** nur die Klassenwahl (gilt ab dem nächsten Spawn), **Tab** zeigt die Punktetabelle. Server-Einstellungen (Punkteziel, Spieler pro Team, Zeitlimit, Teambeschuss) stehen in einer Config-Datei, Vorlage: `server/AoS2.Server/server.example.json`. Ausprobieren: [docs/server.md](docs/server.md#16-team-deathmatch-ausprobieren-seit-m6).
 
-Im Netzspiel wird gekämpft: **1** Spaten, **2** Sturmgewehr, **3** Granate, **4** Raketenwerfer (oder Mausrad), Linksklick feuert, **R** lädt nach. Werte in `data/weapons.json` und `data/combat.json`, Anleitung zum Ausprobieren in [docs/server.md](docs/server.md#15-gegeneinander-kämpfen-seit-m5).
+Im Netzspiel wird gekämpft: **1** Spaten, **2** … **5** die Waffen der Klasse (oder Mausrad), Linksklick feuert, **R** lädt nach, Rechtsklick zielt mit dem Zielfernrohr. Bauen kostet Blöcke aus dem Vorrat der Klasse, Abbauen gibt sie zurück. Werte in `data/weapons.json`, `data/classes.json` und `data/combat.json`; die Tabelle mit Treffern und Zeit bis zum Tod ([docs/balancing.md](docs/balancing.md)) rechnet `dotnet run --project tools/AoS2.Balance -- --out docs/balancing.md`. Anleitung: [Klassen ausprobieren](docs/server.md#17-klassen-ausprobieren-seit-m8), [Werte nachjustieren](docs/server.md#18-werte-nachjustieren-balancing).
 
 Launcher und Spiel lokal ausprobieren, mit lokaler Website, lokalem Backend und Entwicklungs-Login statt Discord (Details in [docs/backend.md](docs/backend.md#3-lokal-entwickeln) und [docs/release.md](docs/release.md#5-ohne-r2-lokal-testen)):
 

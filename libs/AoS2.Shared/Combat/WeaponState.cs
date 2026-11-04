@@ -22,7 +22,7 @@ namespace AoS2.Shared.Combat
     /// </summary>
     public struct WeaponState
     {
-        /// <summary>Gewählter Platz: 0 = Spaten (abbauen/bauen), 1 … = Waffen aus weapons.json.</summary>
+        /// <summary>Gewählter Platz: 0 = Spaten (abbauen/bauen), 1 … = Waffen der Klasse (<see cref="PlayerClass.Weapons"/>).</summary>
         public byte Slot;
 
         /// <summary>Ticks bis zum nächsten möglichen Schuss.</summary>
@@ -62,15 +62,19 @@ namespace AoS2.Shared.Combat
             }
         }
 
-        /// <summary>Volle Munition für alle Waffen (Spawn), Platz <paramref name="slot"/> gewählt und sofort bereit.</summary>
-        public static WeaponState Full(CombatSettings settings, int slot = 0)
+        /// <summary>Volle Munition für alle Waffen der Klasse (Spawn), Platz <paramref name="slot"/> gewählt und sofort bereit.</summary>
+        public static WeaponState Full(PlayerClass cls, int slot = 0)
         {
-            var w = new WeaponState { Slot = (byte)Clamp(slot, settings) };
-            foreach (var weapon in settings.Weapons) w.SetAmmo(weapon.Slot, new WeaponAmmo(weapon.Magazine, weapon.Reserve));
+            var w = new WeaponState { Slot = (byte)Clamp(slot, cls) };
+            for (var i = 1; i <= cls.SlotCount; i++)
+            {
+                var weapon = cls.Weapon(i);
+                w.SetAmmo(i, new WeaponAmmo(weapon.Magazine, weapon.Reserve));
+            }
             return w;
         }
 
-        internal static int Clamp(int slot, CombatSettings settings) => slot < 0 || slot > settings.SlotCount ? 0 : slot;
+        internal static int Clamp(int slot, PlayerClass cls) => slot < 0 || slot > cls.SlotCount ? 0 : slot;
 
         public bool Equals(WeaponState o) =>
             Slot == o.Slot && Cooldown == o.Cooldown && Switch == o.Switch && Reload == o.Reload && TriggerHeld == o.TriggerHeld &&
@@ -80,7 +84,7 @@ namespace AoS2.Shared.Combat
     }
 
     /// <summary>
-    /// Ein Tick der Waffen: Wechsel, Pausen, Nachladen und Feuern. Deterministisch wie <see cref="PlayerMovement"/>:
+    /// Ein Tick der Waffen einer Klasse (<see cref="PlayerClass"/>): Wechsel, Pausen, Nachladen und Feuern. Deterministisch wie <see cref="PlayerMovement"/>:
     /// gleicher Zustand + gleiche Eingabe ergibt auf Client und Server dasselbe.
     /// <list type="bullet">
     /// <item>Wechsel: <see cref="PlayerInput.Weapon"/> wählt den Platz; danach ist die Waffe <c>switchSeconds</c> nicht bereit, Nachladen bricht ab.</item>
@@ -93,19 +97,19 @@ namespace AoS2.Shared.Combat
         /// <summary>Rechnet einen Tick. Liefert den Platz der Waffe, die in diesem Tick feuert, sonst 0.</summary>
         /// <param name="blocked">Feuern ist gerade nicht erlaubt (in der Spawnzone): Feuern zählt wie nicht gedrückt, Wechseln und
         /// Nachladen gehen weiter.</param>
-        public static int Step(ref WeaponState w, PlayerInput input, CombatSettings settings, bool blocked = false)
+        public static int Step(ref WeaponState w, PlayerInput input, PlayerClass cls, bool blocked = false)
         {
-            var slot = WeaponState.Clamp(input.Weapon, settings);
+            var slot = WeaponState.Clamp(input.Weapon, cls);
             if (slot != w.Slot)
             {
                 w.Slot = (byte)slot;
-                w.Switch = (byte)System.Math.Min(settings.SwitchTicks, byte.MaxValue);
+                w.Switch = (byte)System.Math.Min(cls.SwitchTicks, byte.MaxValue);
                 w.Reload = 0;
             }
             else if (w.Switch > 0) w.Switch--;
             if (w.Cooldown > 0) w.Cooldown--;
 
-            var weapon = settings.Weapon(w.Slot);
+            var weapon = cls.Weapon(w.Slot);
             var fire = input.Has(InputButtons.Fire) && !blocked;
             var trigger = fire && (weapon == null || weapon.Automatic || !w.TriggerHeld);
             w.TriggerHeld = fire;

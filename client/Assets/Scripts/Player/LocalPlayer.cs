@@ -15,19 +15,23 @@ namespace AoS2.Client.Player
     /// laufen ebenfalls im Tick, mit kurzer Pause zwischen zwei Aktionen.
     /// Online rechnet die <see cref="AoS2.Shared.Net.Client.ClientSession"/> den Tick (Vorhersage) und schickt die Eingabe an den Server.
     ///
-    /// Online kommen die Waffen dazu (Platz 2 … 4): Linksklick feuert, R lädt nach. Die Waffen rechnet die Session wie die
-    /// Bewegung voraus; feuert sie, zeigt der Spieler sofort Mündungsfeuer und Leuchtspur, getroffen hat aber erst, was der
-    /// Server bestätigt.
+    /// Online kommen die Waffen der eigenen Klasse dazu (Platz 2 … 5): Linksklick feuert, R lädt nach, rechte Maustaste zielt
+    /// mit dem Zielfernrohr (Waffen mit <c>zoom</c>). Die Waffen rechnet die Session wie die Bewegung voraus; feuert sie,
+    /// zeigt der Spieler sofort Mündungsfeuer und Leuchtspur, getroffen hat aber erst, was der Server bestätigt.
     ///
-    /// Steuerung: WASD laufen, Maus schauen, Leertaste springen, Strg ducken, Shift sprinten, 1 Spaten, 2–4 Waffen,
+    /// Steuerung: WASD laufen, Maus schauen, Leertaste springen, Strg ducken, Shift sprinten, 1 Spaten, 2–5 Waffen,
     /// Mausrad Waffe wechseln, mit Spaten: Linksklick abbauen, Rechtsklick bauen, B Baublock; mit Waffe: Linksklick feuern,
-    /// R nachladen. Esc gibt die Maus frei (zweimal: zurück ins Startmenü).
+    /// R nachladen, Rechtsklick zielen. M Klasse und Team, K Klasse. Esc gibt die Maus frei (zweimal: zurück ins Startmenü).
     /// </summary>
     public sealed class LocalPlayer : MonoBehaviour
     {
         private const float MouseSensitivity = 0.1f; // Grad pro Pixel
         private const float CrouchSmoothing = 10f;
         private const float StepSmoothing = 14f;
+        private const float ZoomSmoothing = 18f;
+
+        /// <summary>Senkrechtes Sichtfeld der Kamera in Grad (ohne Zielfernrohr).</summary>
+        public const float FieldOfView = 75f;
 
         /// <summary>Wie schnell eine Korrektur durch den Server ausgeglichen wird (größer = schneller).</summary>
         private const float CorrectionSmoothing = 12f;
@@ -52,6 +56,8 @@ namespace AoS2.Client.Player
         private bool _testFireHeld;
         private bool _fireRequested;
         private bool _reloadRequested;
+        private bool _aimHeld;
+        private bool _testAimHeld;
         private WeaponView _weaponView;
         private float _visualEyeHeight;
         private float _stepOffset;
@@ -63,8 +69,14 @@ namespace AoS2.Client.Player
         public BlockType SelectedBlock => _buildable.Count > 0 ? _buildable[SelectedIndex] : null;
         public int SelectedIndex { get; private set; }
 
-        /// <summary>Gewählter Platz: 0 = Spaten, 1 … = Waffen aus weapons.json (offline nur der Spaten).</summary>
+        /// <summary>Gewählter Platz: 0 = Spaten, 1 … = Waffen der Klasse (offline nur der Spaten).</summary>
         public int Slot { get; private set; }
+
+        /// <summary>Waffe auf dem gewählten Platz (<c>null</c> = Spaten oder offline).</summary>
+        public WeaponSettings Weapon => _game.Session?.Class.Weapon(Slot);
+
+        /// <summary>Rechte Maustaste mit einer Waffe mit Zielfernrohr: Die Kamera vergrößert (<see cref="WeaponSettings.Zoom"/>).</summary>
+        public bool Zoomed => (_aimHeld || _testAimHeld) && Weapon != null && Weapon.Zoom > 1 && (_game.Session == null || _game.Session.Alive);
 
         /// <summary>Waffen, wie die Vorhersage sie gerade sieht (offline leer).</summary>
         public WeaponState Weapons => _game.Session?.Prediction?.Weapons ?? default;
@@ -90,6 +102,9 @@ namespace AoS2.Client.Player
 
         /// <summary>Für Tests: Waffenplatz wählen (wie die Zifferntasten).</summary>
         public void TestSelectSlot(int slot) => SelectSlot(slot);
+
+        /// <summary>Für Tests: rechte Maustaste (Zielfernrohr) halten oder loslassen.</summary>
+        public void TestAim(bool held) => _testAimHeld = held;
 
         /// <summary>Für Tests: Feuern gedrückt halten oder loslassen.</summary>
         public void TestFire(bool held)
@@ -143,13 +158,15 @@ namespace AoS2.Client.Player
 
             ScoreboardHeld = keyboard.tabKey.isPressed;
 
-            // Team-Menü (online): M öffnet und schließt es; solange es offen ist, gehört die Maus dem Menü.
+            // Menü „Klasse und Team“ (online): M öffnet es ganz, K nur mit den Klassen; dieselbe Taste oder Esc schließt.
+            // Solange es offen ist, gehört die Maus dem Menü.
             if (_game.Mode == GameMode.Online)
             {
                 if (_game.TeamMenuOpen)
                 {
                     _fireHeld = false;
-                    if (keyboard.mKey.wasPressedThisFrame || keyboard.escapeKey.wasPressedThisFrame)
+                    _aimHeld = false;
+                    if (keyboard.mKey.wasPressedThisFrame || keyboard.kKey.wasPressedThisFrame || keyboard.escapeKey.wasPressedThisFrame)
                     {
                         _game.CloseTeamMenu();
                         if (!_game.TeamMenuOpen && keyboard.escapeKey.wasPressedThisFrame) return; // Esc schließt nur das Menü
@@ -160,6 +177,11 @@ namespace AoS2.Client.Player
                 else if (keyboard.mKey.wasPressedThisFrame)
                 {
                     _game.OpenTeamMenu();
+                    return;
+                }
+                else if (keyboard.kKey.wasPressedThisFrame)
+                {
+                    _game.OpenClassMenu();
                     return;
                 }
             }
@@ -176,6 +198,7 @@ namespace AoS2.Client.Player
             if (Cursor.lockState != CursorLockMode.Locked)
             {
                 _fireHeld = false; // Maus freigegeben: nicht weiterschießen
+                _aimHeld = false;
                 if (mouse.leftButton.wasPressedThisFrame && Application.isFocused)
                 {
                     SetCursorLocked(true);
@@ -200,17 +223,18 @@ namespace AoS2.Client.Player
                 _fireHeld = mouse.leftButton.isPressed;
                 _fireRequested |= mouse.leftButton.wasPressedThisFrame;
             }
+            _aimHeld = Slot != 0 && mouse.rightButton.isPressed;
             _reloadRequested |= keyboard.rKey.wasPressedThisFrame;
 
-            for (var i = 0; i < 4; i++)
+            for (var i = 0; i <= CombatSettings.MaxWeapons; i++)
                 if (keyboard[Key.Digit1 + i].wasPressedThisFrame) SelectSlot(i);
             var scroll = mouse.scroll.ReadValue().y;
             if (scroll != 0) SelectSlot((Slot + (scroll < 0 ? 1 : -1) + SlotCount + 1) % (SlotCount + 1));
             if (keyboard.bKey.wasPressedThisFrame && _buildable.Count > 0) SelectedIndex = (SelectedIndex + 1) % _buildable.Count;
         }
 
-        /// <summary>Waffenplätze außer dem Spaten (offline keine).</summary>
-        private int SlotCount => _game.Session?.Combat?.SlotCount ?? 0;
+        /// <summary>Waffenplätze der eigenen Klasse außer dem Spaten (offline und als Zuschauer keine).</summary>
+        private int SlotCount => _game.Session?.Class.SlotCount ?? 0;
 
         private void SelectSlot(int slot)
         {
@@ -223,6 +247,7 @@ namespace AoS2.Client.Player
         public void Tick()
         {
             _previous = _state;
+            if (Slot > SlotCount) Slot = 0; // neue Klasse mit weniger Waffen (Respawn)
             var input = new PlayerInput { Buttons = ReadButtons(), Yaw = _yaw, Pitch = _pitch, Weapon = (byte)Slot };
             if (Slot != 0 && (_fireHeld || _testFireHeld || _fireRequested)) input.Buttons |= InputButtons.Fire;
             if (Slot != 0 && _reloadRequested) input.Buttons |= InputButtons.Reload;
@@ -293,7 +318,15 @@ namespace AoS2.Client.Player
             _highlight.Show(Target);
             var session = _game.Session;
             var w = Weapons;
-            _weaponView?.Show(Slot, Slot != 0 && (w.Reload > 0 || w.Switch > 0), session == null || session.Alive);
+            var weapon = Weapon;
+            _weaponView?.Show(weapon, Slot != 0 && (w.Reload > 0 || w.Switch > 0), (session == null || session.Alive) && !Zoomed);
+
+            // Zielfernrohr: Sichtfeld so verkleinern, dass alles zoom-mal so groß erscheint.
+            if (_camera != null)
+            {
+                var fov = Zoomed ? 2 * Mathf.Atan(Mathf.Tan(FieldOfView * 0.5f * Mathf.Deg2Rad) / weapon.Zoom) * Mathf.Rad2Deg : FieldOfView;
+                _camera.fieldOfView = Mathf.Lerp(_camera.fieldOfView, fov, 1f - Mathf.Exp(-ZoomSmoothing * dt));
+            }
         }
 
         /// <summary>
@@ -303,8 +336,8 @@ namespace AoS2.Client.Player
         private void OnFired(int slot, PlayerInput input)
         {
             ShotsFired++;
-            var weapon = _game.Session.Combat.Weapon(slot);
-            _weaponView?.Kick(weapon != null && weapon.Kind == WeaponKind.Rocket ? 1 : 0.5f);
+            var weapon = _game.Session.Class.Weapon(slot);
+            _weaponView?.Kick(weapon != null && (weapon.Kind == WeaponKind.Rocket || weapon.Zoom > 1) ? 1 : 0.5f);
             var effects = _game.Effects;
             if (effects == null || weapon == null) return;
             var dir = PlayerMovement.LookDirection(input.Yaw, input.Pitch);
@@ -335,7 +368,8 @@ namespace AoS2.Client.Player
                 ? _game.TryRemoveBlock(hit.X, hit.Y, hit.Z, hit.Distance)
                 : SelectedBlock == null ? BlockEditResult.NotBuildable : _game.TryPlaceBlock(hit.PlaceX, hit.PlaceY, hit.PlaceZ, SelectedBlock.Id, hit.Distance, _state);
             LastEditTime = Time.time;
-            if (LastEditResult == BlockEditResult.Ok) _cooldownTicks = BlockEditing.CooldownTicks;
+            // Pause bis zur nächsten Aktion: je Klasse (Miner schneller), offline wie bisher.
+            if (LastEditResult == BlockEditResult.Ok) _cooldownTicks = _game.Session?.Class.EditCooldownTicks ?? BlockEditing.CooldownTicks;
         }
 
         /// <summary>Strahl vom Auge in Blickrichtung, so weit man abbauen/bauen kann.</summary>

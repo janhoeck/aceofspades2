@@ -51,6 +51,9 @@ namespace AoS2.Shared.Net.Client
 
         public int Kills { get; internal set; }
         public int Deaths { get; internal set; }
+
+        /// <summary>Klasse laut letztem Snapshot (<see cref="PlayerSnapshot.Class"/>, 0 = keine).</summary>
+        public byte ClassId => HasState ? Current.Class : (byte)0;
     }
 
     /// <summary>
@@ -71,26 +74,83 @@ namespace AoS2.Shared.Net.Client
         private readonly Dictionary<byte, RemotePlayer> _players = new Dictionary<byte, RemotePlayer>();
         private readonly List<WorldEvent> _events = new List<WorldEvent>();
         private readonly Dictionary<BlockPos, byte> _blockDamage = new Dictionary<BlockPos, byte>();
+        private readonly string _playerRigJson;
+        private readonly Dictionary<ushort, BlockEditKind> _pendingEdits = new Dictionary<ushort, BlockEditKind>();
         private ushort _editSeq;
         private Vec3 _correction;
+        private int _serverBlocks;
 
+        /// <param name="rules">Eigene Spielregeln aus <c>data/</c>. Der Server schickt beim Beitritt seine (<see cref="MessageType.GameData"/>);
+        /// ab dann gelten diese.</param>
+        /// <param name="playerRigJson">Spielermodell (Kollisionshöhe je Ausrüstung), um die Regeln des Servers zu lesen.</param>
         /// <param name="readMapFile">Liefert die Bytes von <c>maps/&lt;name&gt;.aos2map</c> oder <c>null</c>, wenn es sie nicht gibt.</param>
         /// <param name="clock">Lokale Zeit in Sekunden (Unity: <c>Time.realtimeSinceStartupAsDouble</c>).</param>
-        /// <param name="combat">Kampfregeln und Waffen; <c>null</c> = ohne Waffen.</param>
-        public ClientSession(BlockRegistry registry, MovementSettings movement, Func<string, byte[]> readMapFile, IMessageSender sender, Func<double> clock,
-            CombatSettings combat = null)
+        public ClientSession(BlockRegistry registry, GameRules rules, string playerRigJson, Func<string, byte[]> readMapFile, IMessageSender sender, Func<double> clock)
         {
             Registry = registry;
-            Movement = movement;
-            Combat = combat;
+            Rules = rules;
+            Class = rules.Classes.None;
+            _playerRigJson = playerRigJson;
             _readMapFile = readMapFile;
             _sender = sender;
             _clock = clock;
         }
 
         public BlockRegistry Registry { get; }
-        public MovementSettings Movement { get; }
-        public CombatSettings Combat { get; }
+
+        /// <summary>Spielregeln: zuerst die eigenen, nach dem Beitritt die des Servers.</summary>
+        public GameRules Rules { get; private set; }
+
+        /// <summary>Die Regeln kamen vom Server (sonst rechnet der Client mit den eigenen).</summary>
+        public bool HasServerRules { get; private set; }
+
+        /// <summary>Bewegung der eigenen Klasse (Tempo, Kollisionshöhe mit Ausrüstung).</summary>
+        public MovementSettings Movement => Class.Movement;
+
+        public CombatSettings Combat => Rules.Combat;
+        public PlayerClasses Classes => Rules.Classes;
+
+        // ---- Klassen ----
+
+        /// <summary>Eigene Klasse laut Server (<see cref="PlayerClasses.None"/>, solange man zuschaut).</summary>
+        public PlayerClass Class { get; private set; }
+
+        /// <summary>Gewählte Klasse für den nächsten Spawn (<c>null</c> = noch keine gewählt, der Server nimmt dann <c>defaultClass</c>).</summary>
+        public PlayerClass NextClass { get; private set; }
+
+        /// <summary>Klasse eines Spielers (eigene oder laut Snapshot), <see cref="PlayerClasses.None"/> wenn unbekannt.</summary>
+        public PlayerClass ClassOf(byte playerId)
+        {
+            if (playerId == PlayerId) return Class;
+            return _players.TryGetValue(playerId, out var p) ? Classes.Get(p.ClassId) ?? Classes.None : Classes.None;
+        }
+
+        /// <summary>
+        /// Klasse für den nächsten Spawn wählen (Regel: der Wechsel gilt beim nächsten Respawn). Zuschauer und Tote erscheinen
+        /// gleich mit ihr, wer lebt, behält seine Klasse bis zum nächsten Tod.
+        /// </summary>
+        public void RequestClass(PlayerClass cls)
+        {
+            if (Phase != ClientPhase.Playing || cls == null || !Classes.IsSelectable(cls.Id)) return;
+            NextClass = cls;
+            _writer.Clear();
+            new ClassSelectRequest { Class = cls.Id }.Write(_writer);
+            _sender.Send(_writer, Delivery.ReliableOrdered);
+        }
+
+        /// <summary>
+        /// Blockvorrat, wie der Client ihn gerade sieht: der letzte Stand vom Server, verrechnet mit den eigenen Blockaktionen,
+        /// die der Server noch nicht beantwortet hat (Bauen −1, Abbauen +1, höchstens <see cref="PlayerClass.Blocks"/>).
+        /// </summary>
+        public int BlocksLeft
+        {
+            get
+            {
+                var blocks = _serverBlocks;
+                foreach (var kind in _pendingEdits.Values) blocks += kind == BlockEditKind.Place ? -1 : 1;
+                return blocks < 0 ? 0 : blocks > Class.Blocks ? Class.Blocks : blocks;
+            }
+        }
 
         public ClientPhase Phase { get; private set; } = ClientPhase.Connecting;
 
@@ -193,6 +253,9 @@ namespace AoS2.Shared.Net.Client
                 var type = (MessageType)r.ReadByte();
                 switch (type)
                 {
+                    case MessageType.GameData:
+                        OnGameData(GameDataFiles.Read(r));
+                        break;
                     case MessageType.Welcome:
                         OnWelcome(Welcome.Read(r));
                         break;
@@ -226,6 +289,23 @@ namespace AoS2.Shared.Net.Client
         {
             Phase = ClientPhase.Disconnected;
             Error = message;
+        }
+
+        /// <summary>Regeln des Servers übernehmen. Sie kommen vor der Begrüßung, damit Vorhersage und Anzeige gleich mit ihnen rechnen.</summary>
+        private void OnGameData(GameDataFiles files)
+        {
+            if (World != null || HasServerRules) throw new ProtocolException("Spielregeln nach der Begrüßung.");
+            try
+            {
+                Rules = GameRules.Parse(files, _playerRigJson);
+            }
+            catch (FormatException e)
+            {
+                Fail("Die Spielregeln des Servers sind ungültig: " + e.Message);
+                return;
+            }
+            HasServerRules = true;
+            Class = Rules.Classes.None;
         }
 
         private void OnWelcome(Welcome welcome)
@@ -267,7 +347,7 @@ namespace AoS2.Shared.Net.Client
             Blocks = new PredictedBlocks(World);
             Falling = new NetFallingGroups(Blocks);
             Zones = new MapZones(Metadata);
-            Prediction = new ClientPrediction(World, Movement, welcome.Spawn, Combat, Zones);
+            Prediction = new ClientPrediction(World, Class, welcome.Spawn, Zones);
             Projectiles = new NetProjectiles(World, Combat, Movement.DeltaTime, Zones);
             Health = 0; // Neu Beigetretene schauen zu, bis sie ein Team gewählt haben (der Snapshot bestätigt es)
             World.BlockChanged += (x, y, z, _, __) => _blockDamage.Remove(new BlockPos(x, y, z));
@@ -283,6 +363,9 @@ namespace AoS2.Shared.Net.Client
             SnapshotsReceived++;
             Clock.OnSnapshot(s.ServerTick, _clock());
 
+            // Die Klasse wechselt nur beim Respawn. Ab der bestätigten Eingabe gilt die aus dem Snapshot, auch für die neueren.
+            Class = Classes.Get(s.OwnClass) ?? Classes.None;
+            Prediction.Class = Class;
             var c = Prediction.Reconcile(s.AckInputTick, s.Own, s.OwnWeapons);
             _correction = _correction + c;
             Health = s.OwnHealth;
@@ -304,7 +387,12 @@ namespace AoS2.Shared.Net.Client
                     break;
                 case WorldEventType.EditResult:
                     Blocks.Resolve(e.Seq);
+                    _pendingEdits.Remove(e.Seq);
+                    _serverBlocks = e.Supply;
                     if (e.Result != BlockEditResult.Ok) EditRejected?.Invoke(e.Result);
+                    break;
+                case WorldEventType.BlockSupply:
+                    _serverBlocks = e.Supply;
                     break;
                 case WorldEventType.FallStart:
                     Falling.Start(e.GroupId, e.Blocks, e.Fallen, e.Velocity, LastSnapshotTick);
@@ -334,7 +422,7 @@ namespace AoS2.Shared.Net.Client
                     if (e.PlayerId == PlayerId)
                     {
                         Health = 0;
-                        RespawnTicks = Combat?.RespawnTicks ?? 0;
+                        RespawnTicks = Combat.RespawnTicks;
                     }
                     CombatEvent?.Invoke(e);
                     break;
@@ -433,6 +521,7 @@ namespace AoS2.Shared.Net.Client
             if (!Alive) return BlockEditResult.Dead;
             if (MatchOver) return BlockEditResult.MatchOver;
             var result = BlockEditing.CanPlace(World, Registry, x, y, z, id, distance, Prediction.State, Movement, Zones);
+            if (result == BlockEditResult.Ok && BlocksLeft <= 0) result = BlockEditResult.NoBlocks;
             if (result == BlockEditResult.Ok) SendEdit(BlockEditKind.Place, x, y, z, id);
             return result;
         }
@@ -441,6 +530,7 @@ namespace AoS2.Shared.Net.Client
         {
             var seq = ++_editSeq;
             Blocks.Predict(seq, x, y, z, id);
+            _pendingEdits[seq] = kind;
             var request = new BlockEditRequest { Seq = seq, Tick = Prediction.Tick, Kind = kind, X = x, Y = y, Z = z, BlockId = id };
             _writer.Clear();
             request.Write(_writer);

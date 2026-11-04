@@ -30,10 +30,16 @@ namespace AoS2.Shared.Net
         /// <summary>Teamwunsch (<see cref="TeamSelectRequest"/>).</summary>
         TeamSelect = 3,
 
+        /// <summary>Klassenwunsch (<see cref="ClassSelectRequest"/>), gilt ab dem nächsten Spawn.</summary>
+        ClassSelect = 4,
+
         // Server → Client
         Welcome = 10,
         Snapshot = 11,
         Events = 12,
+
+        /// <summary>Spielregeln des Servers (<see cref="GameDataFiles"/>), kommt vor <see cref="Welcome"/>.</summary>
+        GameData = 13,
     }
 
     /// <summary>Warum eine Verbindung abgelehnt oder getrennt wurde. Steht in <see cref="DisconnectNotice"/>.</summary>

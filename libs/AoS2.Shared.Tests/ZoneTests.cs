@@ -22,6 +22,8 @@ public class ZoneTests
     private static WeaponSettings Rocket => Combat.Weapons.Single(w => w.Name == "rocket");
     private static WeaponSettings Grenade => Combat.Weapons.Single(w => w.Name == "grenade");
 
+    private static readonly PlayerClass Loadout = TestData.Loadout(Combat, "rifle", "grenade", "rocket");
+
     private static MapMetadata Metadata(bool combatZone = false)
     {
         var meta = new MapMetadata { Name = "Zonen" };
@@ -156,7 +158,7 @@ public class ZoneTests
         var world = World();
         var zones = Zones();
         var start = new PlayerState { Position = new Vec3(5.5f, 4, 15.5f), OnGround = true };
-        var client = new ClientPrediction(world, Movement, start, Combat, zones) { Team = Team.Green };
+        var client = new ClientPrediction(world, Loadout, start, zones) { Team = Team.Green };
         var input = new PlayerInput { Buttons = InputButtons.Forward, Yaw = 90 };
         for (var i = 0; i < 120; i++) client.Step(input);
         Assert.Equal(Walk(start, world, zones.BarriersFor(Team.Green), 120).Position, client.State.Position);
@@ -167,14 +169,14 @@ public class ZoneTests
     [Fact]
     public void Weapons_BlockedInSpawn_FireAgainOutside()
     {
-        var w = WeaponState.Full(Combat, 1);
+        var w = WeaponState.Full(Loadout, 1);
         var fire = new PlayerInput { Buttons = InputButtons.Fire, Weapon = 1 };
-        for (var i = 0; i < 60; i++) Assert.Equal(0, WeaponSim.Step(ref w, fire, Combat, blocked: true));
+        for (var i = 0; i < 60; i++) Assert.Equal(0, WeaponSim.Step(ref w, fire, Loadout, blocked: true));
         Assert.Equal(30, w.GetAmmo(1).Magazine);
-        Assert.Equal(1, WeaponSim.Step(ref w, fire, Combat, blocked: false));
+        Assert.Equal(1, WeaponSim.Step(ref w, fire, Loadout, blocked: false));
 
         // Nachladen und Wechseln gehen auch im Spawn.
-        WeaponSim.Step(ref w, new PlayerInput { Buttons = InputButtons.Reload, Weapon = 1 }, Combat, blocked: true);
+        WeaponSim.Step(ref w, new PlayerInput { Buttons = InputButtons.Reload, Weapon = 1 }, Loadout, blocked: true);
         Assert.True(w.Reload > 0);
     }
 
@@ -183,7 +185,7 @@ public class ZoneTests
     {
         var world = World();
         var start = new PlayerState { Position = new Vec3(15.5f, 4, 15.5f), OnGround = true };
-        var client = new ClientPrediction(world, Movement, start, Combat, Zones()) { Team = Team.Blue };
+        var client = new ClientPrediction(world, Loadout, start, Zones()) { Team = Team.Blue };
         var shots = 0;
         // Feuern und dabei aus dem Spawn laufen (+x): Schüsse erst ab der Zonengrenze x = 20.
         for (var i = 0; i < 90; i++)

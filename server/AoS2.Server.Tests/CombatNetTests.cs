@@ -1,3 +1,4 @@
+using AoS2.Shared.Combat;
 using AoS2.Shared;
 using AoS2.Shared.Movement;
 using AoS2.Shared.Net;
@@ -13,12 +14,15 @@ namespace AoS2.Server.Tests;
 /// </summary>
 public class CombatNetTests
 {
-    private const byte Rifle = 1, Grenade = 2, Rocket = 3;
+    /// <summary>Plätze: Assault (Standardklasse) hat Gewehr, Pistole, Granaten; der Rocketeer den Raketenwerfer auf Platz 1.</summary>
+    private const byte Rifle = 1, Grenade = 3, Launcher = 1;
 
-    private static (SimulatedNetwork Net, TestClient A, TestClient B) Duel(Vec3 posA, Vec3 posB, double latency = 0.05)
+    private static byte RocketId => (byte)TestArena.Combat.Find("rocket")!.Id;
+
+    private static (SimulatedNetwork Net, TestClient A, TestClient B) Duel(Vec3 posA, Vec3 posB, double latency = 0.05, PlayerClass? classA = null)
     {
         var net = new SimulatedNetwork { OneWayLatency = latency };
-        var a = net.Join("Anna");
+        var a = net.Join("Anna", cls: classA);
         var b = net.Join("Ben");
         Assert.True(net.RunUntil(() => a.Ready && b.Ready));
         net.Teleport(a, posA);
@@ -174,8 +178,8 @@ public class CombatNetTests
     [Fact]
     public void Rocket_DirectHit_Kills_AndBlowsCrater()
     {
-        var (net, a, b) = Duel(new Vec3(20.5f, 4, 10.5f), new Vec3(20.5f, 4, 20.5f));
-        a.Input.Weapon = Rocket;
+        var (net, a, b) = Duel(new Vec3(20.5f, 4, 10.5f), new Vec3(20.5f, 4, 20.5f), classA: TestArena.Rocketeer);
+        a.Input.Weapon = Launcher;
         net.Run(0.5);
         Aim(a, net.ServerPlayer(b).State.Position + new Vec3(0, 1, 0));
         a.FireTicks = 1;
@@ -186,10 +190,10 @@ public class CombatNetTests
 
         Assert.False(net.ServerPlayer(b).Alive);
         var kill = Assert.Single(b.Events, e => e.Type == WorldEventType.PlayerKilled);
-        Assert.Equal((a.PlayerId, Rocket, WorldEvent.ExplosionZone), (kill.Attacker, kill.Weapon, kill.Zone));
+        Assert.Equal((a.PlayerId, RocketId, WorldEvent.ExplosionZone), (kill.Attacker, kill.Weapon, kill.Zone)); // Waffen-ID, nicht der Platz
         Assert.Equal(100, net.ServerPlayer(a).Health); // weit genug weg
         Assert.Empty(a.Session.Projectiles.All);
-        Assert.Equal(0, a.Session.Prediction.Weapons.GetAmmo(Rocket).Magazine + a.Session.Prediction.Weapons.GetAmmo(Rocket).Reserve - 5);
+        Assert.Equal(0, a.Session.Prediction.Weapons.GetAmmo(Launcher).Magazine + a.Session.Prediction.Weapons.GetAmmo(Launcher).Reserve - 5);
 
         // Die Explosion hat Blöcke unter Ben zerstört; alle sehen dieselbe Welt.
         var world = net.Match.World;
@@ -201,8 +205,8 @@ public class CombatNetTests
     [Fact]
     public void Rocket_AtPillar_DestroysBlocks_BeamFalls_SameEverywhere()
     {
-        var (net, a, b) = Duel(new Vec3(20.5f, 4, 18.5f), new Vec3(40.5f, 4, 40.5f)); // schräg, an den Spawnzonen (z 16…17) vorbei
-        a.Input.Weapon = Rocket;
+        var (net, a, b) = Duel(new Vec3(20.5f, 4, 18.5f), new Vec3(40.5f, 4, 40.5f), classA: TestArena.Rocketeer); // schräg, an den Spawnzonen (z 16…17) vorbei
+        a.Input.Weapon = Launcher;
         net.Run(0.5);
         Aim(a, new Vec3(14f, 7.5f, 16.5f)); // Verbindungsblock (13, 7, 16) von vorn
         a.FireTicks = 1;
@@ -266,9 +270,9 @@ public class CombatNetTests
         Aim(a, new Vec3(14f, 5.5f, 16.5f));
         a.FireTicks = 1;
         net.Run(0.3);
-        a.Input.Weapon = Rocket;
+        a.Input.Weapon = Grenade;
         net.Run(0.5);
-        a.Input.Pitch = -89; // in den Himmel
+        a.Input.Pitch = -89; // Granate in den Himmel
         a.FireTicks = 1;
         net.Run(0.3);
         Assert.Single(net.Match.Projectiles);

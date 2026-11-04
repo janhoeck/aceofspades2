@@ -7,10 +7,11 @@ using UnityEngine;
 namespace AoS2.Client.Player
 {
     /// <summary>
-    /// Zeigt die anderen Spieler im Netzspiel mit dem Spielermodell (<see cref="PlayerModel"/>). Position, Blick, Animation und
-    /// Waffe kommen interpoliert aus der <see cref="ClientSession"/> (leicht verzögert, dafür flüssig); die Pose rechnet
-    /// <see cref="PlayerPose"/> aus AoS2.Shared zum selben Zeitpunkt, zu dem der Server beim Lag-Ausgleich prüft.
-    /// Die Textur zeigt das Team (Blau oder Grün). Tote Spieler und Zuschauer werden ausgeblendet.
+    /// Zeigt die anderen Spieler im Netzspiel mit dem Spielermodell (<see cref="PlayerModel"/>). Position, Blick, Animation,
+    /// Klasse und Waffe kommen interpoliert aus der <see cref="ClientSession"/> (leicht verzögert, dafür flüssig); die Pose
+    /// rechnet <see cref="PlayerPose"/> aus AoS2.Shared zum selben Zeitpunkt, zu dem der Server beim Lag-Ausgleich prüft.
+    /// Die Textur zeigt das Team (Blau oder Grün), die Ausrüstung die Klasse. Wechselt die Klasse (beim Respawn), wird das
+    /// Modell mit der neuen Ausrüstung neu gebaut. Tote Spieler und Zuschauer werden ausgeblendet.
     /// </summary>
     public sealed class RemotePlayersView : MonoBehaviour
     {
@@ -28,6 +29,7 @@ namespace AoS2.Client.Player
         {
             public PlayerModel Model;
             public Team Team;
+            public byte Class;
             public float FlashUntil;
         }
 
@@ -43,10 +45,10 @@ namespace AoS2.Client.Player
 
         public int Count => _avatars.Count;
 
-        public void Initialize(PlayerRig rig, Material blue, Material green, Material weaponMaterial)
+        public void Initialize(PlayerRig rig, float minHitboxPixels, Material blue, Material green, Material weaponMaterial)
         {
             _rig = rig;
-            _pose = new PlayerPose(rig);
+            _pose = new PlayerPose(rig, minHitboxPixels);
             _blue = blue;
             _green = green;
             _weaponMaterial = weaponMaterial;
@@ -57,6 +59,9 @@ namespace AoS2.Client.Player
 
         /// <summary>Team, dessen Farbe das Modell gerade trägt (für Tests).</summary>
         public Team ShownTeam(byte id) => _avatars.TryGetValue(id, out var a) ? a.Team : Team.None;
+
+        /// <summary>Ausrüstung, die das Modell gerade trägt (für Tests), <c>null</c> = keine.</summary>
+        public string ShownGear(byte id) => _avatars.TryGetValue(id, out var a) ? a.Model.GearClass : null;
 
         /// <summary>Getroffen: Modell kurz aufleuchten lassen.</summary>
         public void Flash(byte id)
@@ -70,9 +75,18 @@ namespace AoS2.Client.Player
             foreach (var remote in session.RemotePlayers.Values)
             {
                 if (!remote.HasState) continue;
-                if (!_avatars.TryGetValue(remote.Id, out var avatar))
+                var s = remote.Current;
+                var cls = session.Classes.Get(s.Class) ?? session.Classes.None;
+                if (_avatars.TryGetValue(remote.Id, out var avatar) && avatar.Class != s.Class)
                 {
-                    avatar = new Avatar { Model = PlayerModel.Create(_rig, MaterialFor(remote.Team), _weaponMaterial, transform, "Spieler " + remote.Name), Team = remote.Team };
+                    Destroy(avatar.Model.gameObject); // neue Klasse: anderes Modell (Ausrüstung)
+                    _avatars.Remove(remote.Id);
+                    avatar = null;
+                }
+                if (avatar == null)
+                {
+                    var model = PlayerModel.Create(_rig, MaterialFor(remote.Team), _weaponMaterial, transform, $"Spieler {remote.Name} ({cls.DisplayName})", cls.Gear);
+                    avatar = new Avatar { Model = model, Team = remote.Team, Class = s.Class };
                     _avatars.Add(remote.Id, avatar);
                 }
                 if (avatar.Team != remote.Team)
@@ -80,13 +94,12 @@ namespace AoS2.Client.Player
                     avatar.Team = remote.Team;
                     avatar.Model.SetMaterial(MaterialFor(remote.Team));
                 }
-                var s = remote.Current;
                 var visible = s.Alive && remote.Team != Team.None;
                 avatar.Model.gameObject.SetActive(visible);
                 if (!visible) continue;
                 _pose.Evaluate(s.Animation, session.RenderTick, s.Pitch, s.Weapon);
                 avatar.Model.transform.position = new Vector3(s.Position.X, s.Position.Y, s.Position.Z);
-                avatar.Model.Apply(_pose, s.Position, s.Yaw, s.Weapon);
+                avatar.Model.Apply(_pose, s.Position, s.Yaw, cls.Weapon(s.Weapon)?.Model ?? WeaponView.SpadeModel);
                 avatar.Model.Flash(Mathf.Clamp01((avatar.FlashUntil - Time.time) / FlashSeconds));
             }
 

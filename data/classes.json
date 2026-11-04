@@ -1,0 +1,30 @@
+{
+  "_comment": "Klassen (Zeiten in Sekunden). Gelesen von AoS2.Shared/Combat/PlayerClasses.cs, Client und Server lesen dieselbe Datei (online schickt der Server seine an den Client). Die Reihenfolge ist die Klassen-ID im Protokoll und im Menü (höchstens 7 Klassen). defaultClass: Klasse für Spieler, die keine gewählt haben. gear: Ausrüstung aus player_rig.json (Würfel mit dieser Klasse sind sichtbar und Trefferzone; bestimmt auch die Kollisionshöhe, stances). weapons: Namen aus weapons.json für die Plätze 2, 3, 4, 5 (Platz 1 ist immer der Spaten). blocks: Blockvorrat (Abbauen gibt einen Block zurück, Respawn füllt auf). editSeconds: Pause zwischen zwei Blockaktionen (abbauen oder bauen). speed: Faktor für Gehen, Sprinten und Ducken (1 = movement.json). health (optional): Lebenspunkte, sonst aus combat.json.",
+  "defaultClass": "assault",
+  "classes": [
+    {
+      "name": "miner", "displayName": "Miner", "gear": "miner",
+      "description": "Gräbt Tunnel und baut schnell. MP für den Nahkampf, Granaten zum Sprengen.",
+      "weapons": ["smg", "grenade"],
+      "blocks": 100, "editSeconds": 0.1, "speed": 1.0
+    },
+    {
+      "name": "assault", "displayName": "Assault", "gear": "assault",
+      "description": "Allrounder mit Sturmgewehr, Pistole und Granaten.",
+      "weapons": ["rifle", "pistol", "grenade"],
+      "blocks": 50, "editSeconds": 0.2, "speed": 1.0
+    },
+    {
+      "name": "recon", "displayName": "Recon", "gear": "recon",
+      "description": "Kämpft auf Distanz: Scharfschützengewehr mit Zielfernrohr. Läuft schneller als alle anderen.",
+      "weapons": ["sniper", "pistol"],
+      "blocks": 30, "editSeconds": 0.2, "speed": 1.1
+    },
+    {
+      "name": "rocketeer", "displayName": "Rocketeer", "gear": "rocketeer",
+      "description": "Zerstört auf Distanz mit dem Raketenwerfer. Der schwere Rucksack macht ihn langsamer.",
+      "weapons": ["rocket", "pistol"],
+      "blocks": 30, "editSeconds": 0.2, "speed": 0.9
+    }
+  ]
+}

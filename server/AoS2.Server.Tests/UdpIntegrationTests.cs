@@ -258,8 +258,8 @@ public sealed class UdpIntegrationTests : IDisposable
             Clock = clock;
             Net = new NetClient();
             var content = TestArena.Content;
-            Session = new ClientSession(content.Registry, content.Movement,
-                map => map == content.MapName ? content.MapFileBytes : null, Net, clock, content.Combat);
+            Session = new ClientSession(content.Registry, content.Rules, content.RigJson,
+                map => map == content.MapName ? content.MapFileBytes : null, Net, clock);
             Session.EditRejected += r => Rejected.Add(r);
             Net.Session = Session;
         }

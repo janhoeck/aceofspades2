@@ -66,6 +66,7 @@ public sealed partial class Match
         Alive = p.Alive,
         Life = p.Life,
         Weapon = p.WeaponsState.Slot,
+        Class = p.Class.Id,
         Animation = p.AnimationState,
     };
 
@@ -118,12 +119,12 @@ public sealed partial class Match
 
     // ---- Schießen ----
 
-    /// <summary>Die Waffe auf <paramref name="slot"/> feuert in diesem Eingabe-Tick (laut <see cref="WeaponSim"/>).</summary>
+    /// <summary>Die Waffe auf Platz <paramref name="slot"/> der Klasse feuert in diesem Eingabe-Tick (laut <see cref="WeaponSim"/>).</summary>
     private void Fire(ServerPlayer shooter, int slot, PlayerInput input)
     {
-        var weapon = _content.Combat.Weapon(slot);
+        var weapon = shooter.Class.Weapon(slot);
         if (weapon == null) return;
-        var eye = shooter.State.Eye(_content.Movement);
+        var eye = shooter.State.Eye(shooter.Class.Movement);
         var dir = PlayerMovement.LookDirection(input.Yaw, input.Pitch);
         if (weapon.Kind == WeaponKind.Hitscan) FireHitscan(shooter, weapon, eye, dir, input.ViewTick);
         else SpawnProjectile(shooter, weapon, eye, dir);
@@ -148,8 +149,10 @@ public sealed partial class Match
         foreach (var other in _players.Values)
         {
             if (other == shooter || !other.Alive || PassesThrough(shooter, other) || !TryRewind(other, view, out var seen) || !seen.Alive) continue;
+            // Trefferzonen: Grundkörper plus die Ausrüstung der Klasse, die der Schütze gesehen hat.
             _pose.Evaluate(seen.Animation, view, seen.Pitch, seen.Weapon);
-            if (!_pose.Raycast(seen.Position, seen.Yaw, null, eye, dir, nearest, out var distance, out var box)) continue;
+            var gear = _content.Classes.Get(seen.Class)?.Gear;
+            if (!_pose.Raycast(seen.Position, seen.Yaw, gear, eye, dir, nearest, out var distance, out var box)) continue;
             nearest = distance;
             victim = other;
             zone = _content.Rig.Boxes[box].Zone;
@@ -160,7 +163,8 @@ public sealed partial class Match
         if (victim != null)
         {
             result = ShotHit.Player;
-            Damage(victim, shooter.Id, weapon.Damage * _content.Combat.ZoneFactor(zone), (byte)weapon.Slot, (byte)zone);
+            // Grundschaden mit Abfall über die Entfernung, dann der Faktor der Trefferzone.
+            Damage(victim, shooter.Id, weapon.DamageAt(nearest) * _content.Combat.ZoneFactor(zone), (byte)weapon.Id, (byte)zone);
         }
         else if (blockHit)
         {
@@ -169,7 +173,7 @@ public sealed partial class Match
         }
 
         _scratch.Clear();
-        WorldEvents.WriteShotFired(_scratch, shooter.Id, (byte)weapon.Slot, eye, end, result);
+        WorldEvents.WriteShotFired(_scratch, shooter.Id, (byte)weapon.Id, eye, end, result);
         BroadcastExcept(shooter.Id, _scratch);
         ShotResolved?.Invoke(new ShotReport(shooter.Id, victim?.Id, zone, view, eye, end));
     }
@@ -233,7 +237,7 @@ public sealed partial class Match
     {
         var p = new ServerProjectile
         {
-            Projectile = new Projectile { Id = ++_nextProjectileId, Weapon = (byte)weapon.Slot, Owner = shooter.Id, Position = eye, Velocity = dir * weapon.Speed },
+            Projectile = new Projectile { Id = ++_nextProjectileId, Weapon = (byte)weapon.Id, Owner = shooter.Id, Position = eye, Velocity = dir * weapon.Speed },
             SpawnTick = Tick,
         };
         _projectiles.Add(p);
@@ -284,10 +288,10 @@ public sealed partial class Match
         var dir = move * (1 / length);
         var shooter = FindPlayer(owner);
         float? nearest = null;
-        var m = _content.Movement;
         foreach (var p in _players.Values)
         {
             if (p.Id == owner || !p.Alive || PassesThrough(shooter, p)) continue;
+            var m = p.Class.Movement;
             var feet = p.State.Position;
             var min = new Vec3(feet.X - m.HalfWidth, feet.Y, feet.Z - m.HalfWidth);
             var max = new Vec3(feet.X + m.HalfWidth, feet.Y + m.Height(p.State.Crouching), feet.Z + m.HalfWidth);
@@ -307,10 +311,10 @@ public sealed partial class Match
         WorldEvents.WriteProjectileExploded(_scratch, p.Id, p.Weapon, p.Position, Tick);
         Broadcast(_scratch);
 
-        var m = _content.Movement;
         foreach (var victim in _players.Values.ToList())
         {
             if (!victim.Alive) continue;
+            var m = victim.Class.Movement;
             var amount = Explosions.PlayerDamage(World, p.Position, e.Radius, e.Damage, victim.State.Position, m.HalfWidth, m.Height(victim.State.Crouching));
             if (victim.Id == p.Owner) amount *= _content.Combat.SelfDamage;
             Damage(victim, p.Owner, amount, p.Weapon, WorldEvent.ExplosionZone);

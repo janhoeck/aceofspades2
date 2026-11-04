@@ -82,6 +82,17 @@ public sealed class ServerPlayer
     public int Kills { get; internal set; }
     public int Deaths { get; internal set; }
 
+    // ---- Klasse ----
+
+    /// <summary>Aktive Klasse: Waffen, Tempo, Kollisionshöhe, Ausrüstung (Trefferzonen). Ändert sich nur beim Respawn.</summary>
+    public PlayerClass Class { get; internal set; } = null!;
+
+    /// <summary>Gewählte Klasse für den nächsten Spawn (<c>null</c> = keine gewählt, dann <c>defaultClass</c>).</summary>
+    public PlayerClass? NextClass { get; internal set; }
+
+    /// <summary>Blockvorrat: Bauen −1, Abbauen +1 (höchstens <see cref="PlayerClass.Blocks"/>), der Respawn füllt auf.</summary>
+    public int Blocks { get; internal set; }
+
     /// <summary>Waffen und Munition, Tick für Tick aus den Eingaben gerechnet wie auf dem Client.</summary>
     internal WeaponState WeaponsState;
 

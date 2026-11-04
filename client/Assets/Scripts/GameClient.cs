@@ -49,6 +49,7 @@ namespace AoS2.Client
         [SerializeField] private string mapName = "testmap";
 
         private BlockTextures _textures;
+        private string _rigJson;
         private Material _voxelMaterial;
         private Material _lineMaterial;
         private Material _blueMaterial;
@@ -68,10 +69,15 @@ namespace AoS2.Client
         public GameMode Mode { get; private set; } = GameMode.Menu;
 
         public BlockRegistry Registry { get; private set; }
-        public MovementSettings Movement { get; private set; }
 
-        /// <summary>Kampfregeln und Waffen (data/combat.json, data/weapons.json).</summary>
-        public CombatSettings Combat { get; private set; }
+        /// <summary>Eigene Spielregeln aus data/ (Bewegung, Kampf, Waffen, Klassen). Online gelten die des Servers (<see cref="ClientSession.Rules"/>).</summary>
+        public GameRules Rules { get; private set; }
+
+        /// <summary>Bewegung: online die der eigenen Klasse (Tempo, Kollisionshöhe mit Ausrüstung), offline ohne Klasse.</summary>
+        public MovementSettings Movement => Session != null ? Session.Movement : Rules.Movement;
+
+        /// <summary>Kampfregeln und Waffen: online die des Servers, sonst data/combat.json und data/weapons.json.</summary>
+        public CombatSettings Combat => Session != null ? Session.Combat : Rules.Combat;
 
         /// <summary>Spielermodell: Knochen, Würfel, Animationen (data/player_rig.json).</summary>
         public PlayerRig Rig { get; private set; }
@@ -140,11 +146,10 @@ namespace AoS2.Client
         private void LoadData()
         {
             Registry = BlockRegistry.Parse(File.ReadAllText(GameDataPaths.DataFile("blocks.json")));
-            var rigJson = File.ReadAllText(GameDataPaths.DataFile("player_rig.json"));
-            Movement = MovementSettings.Parse(File.ReadAllText(GameDataPaths.DataFile("movement.json")), rigJson);
-            Combat = CombatSettings.Parse(File.ReadAllText(GameDataPaths.DataFile("combat.json")), File.ReadAllText(GameDataPaths.DataFile("weapons.json")), Movement.TickRate);
-            Rig = PlayerRig.Parse(rigJson);
-            if (Rig.Fps != Movement.TickRate) throw new FormatException($"player_rig.json ist mit {Rig.Fps} Bildern/s abgetastet, das Spiel rechnet mit {Movement.TickRate} Ticks/s.");
+            _rigJson = File.ReadAllText(GameDataPaths.DataFile("player_rig.json"));
+            Rules = GameRules.Parse(GameDataFiles.Load(name => File.ReadAllText(GameDataPaths.DataFile(name))), _rigJson);
+            Rig = PlayerRig.Parse(_rigJson);
+            if (Rig.Fps != Rules.Movement.TickRate) throw new FormatException($"player_rig.json ist mit {Rig.Fps} Bildern/s abgetastet, das Spiel rechnet mit {Rules.Movement.TickRate} Ticks/s.");
             _textures = BlockTextures.Load(Registry, GameDataPaths.BlockTexturesFolder);
             _voxelMaterial = new Material(voxelShader) { name = "Voxel" };
             _voxelMaterial.SetTexture("_BlockTextures", _textures.Array);
@@ -242,7 +247,7 @@ namespace AoS2.Client
 
             Status = $"Verbinde mit {address} …";
             Net = new NetClient();
-            Session = new ClientSession(Registry, Movement, ReadMapFile, Net, () => Time.realtimeSinceStartupAsDouble, Combat);
+            Session = new ClientSession(Registry, Rules, _rigJson, ReadMapFile, Net, () => Time.realtimeSinceStartupAsDouble);
             Session.EditRejected += result => Player?.ShowEditResult(result);
             Session.CombatEvent += OnCombatEvent;
             Session.MatchEvent += OnMatchEvent;
@@ -281,7 +286,7 @@ namespace AoS2.Client
             {
                 IsReady = true;
                 Status = null;
-                if (Session.Team == Team.None) OpenTeamMenu(); // erst ein Team wählen
+                if (Session.Team == Team.None) OpenTeamMenu(); // erst Klasse und Team wählen
                 Debug.Log($"[AoS2] Verbunden mit {ServerAddressText} als {Session.PlayerName}, Map \"{Session.MapName}\"");
             }
         }
@@ -344,6 +349,7 @@ namespace AoS2.Client
             Session = null;
             IsReady = false;
             TeamMenuOpen = false;
+            ClassMenuOnly = false;
             DestroyWorldView();
             World = null;
             Metadata = null;
@@ -367,7 +373,7 @@ namespace AoS2.Client
             if (Mode == GameMode.Online)
             {
                 RemotePlayers = new GameObject("Andere Spieler").AddComponent<RemotePlayersView>();
-                RemotePlayers.Initialize(Rig, _blueMaterial, _greenMaterial, EffectMaterial);
+                RemotePlayers.Initialize(Rig, Combat.MinHitboxPixels, _blueMaterial, _greenMaterial, EffectMaterial);
                 Cracks = new GameObject("Risse").AddComponent<BlockCracksView>();
                 Cracks.Initialize(modelShader);
             }
@@ -414,15 +420,27 @@ namespace AoS2.Client
             if (_greenTexture != null) Destroy(_greenTexture);
         }
 
-        // ---- Teams ----
+        // ---- Teams und Klassen ----
 
-        /// <summary>Das Team-Menü ist offen (Maus frei). Nach dem Beitritt immer, bis ein Team gewählt ist; danach mit M.</summary>
+        /// <summary>
+        /// Das Menü „Klasse und Team“ ist offen (Maus frei). Nach dem Beitritt immer, bis ein Team gewählt ist; danach mit M
+        /// (Klasse und Team) oder K (nur Klasse, <see cref="ClassMenuOnly"/>).
+        /// </summary>
         public bool TeamMenuOpen { get; private set; }
 
-        public void OpenTeamMenu()
+        /// <summary>Das Menü zeigt nur die Klassen (Taste K), nicht die Teams.</summary>
+        public bool ClassMenuOnly { get; private set; }
+
+        public void OpenTeamMenu() => OpenMenu(false);
+
+        /// <summary>Klassenwahl (Taste K). Ohne Team gibt es nur das ganze Menü.</summary>
+        public void OpenClassMenu() => OpenMenu(Session != null && Session.Team != Team.None);
+
+        private void OpenMenu(bool classOnly)
         {
             if (Mode != GameMode.Online || Session == null) return;
             TeamMenuOpen = true;
+            ClassMenuOnly = classOnly;
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
         }
@@ -432,6 +450,46 @@ namespace AoS2.Client
         {
             if (Session != null && Session.Team == Team.None) return;
             TeamMenuOpen = false;
+            ClassMenuOnly = false;
+        }
+
+        /// <summary>Klasse, die im Menü markiert ist: die gewählte für den nächsten Spawn, sonst die aktuelle, sonst die Standardklasse.</summary>
+        public PlayerClass MenuClass
+        {
+            get
+            {
+                if (Session == null) return null;
+                if (Session.NextClass != null) return Session.NextClass;
+                return Session.Class.Id != 0 ? Session.Class : Session.Classes.Default;
+            }
+        }
+
+        /// <summary>
+        /// Klasse wählen. Regel: Sie gilt ab dem nächsten Spawn. Wer noch kein Team hat, erscheint gleich mit ihr, sobald er
+        /// ein Team wählt; wer tot ist, beim Respawn; wer lebt, nach dem nächsten Tod (oder Teamwechsel).
+        /// </summary>
+        public void ChooseClass(PlayerClass cls)
+        {
+            if (Session == null || cls == null) return;
+            var changed = cls != Session.Class || Session.NextClass != null;
+            Session.RequestClass(cls);
+            if (Session.Team == Team.None) return; // im Menü geht es mit der Teamwahl weiter
+            if (changed)
+                Feed.ShowTeamMessage(cls == Session.Class ? $"Du bleibst {cls.DisplayName}."
+                    : Session.Alive ? $"Ab dem nächsten Spawn spielst du {cls.DisplayName}." : $"Du erscheinst als {cls.DisplayName}.");
+            if (ClassMenuOnly)
+            {
+                TeamMenuOpen = false;
+                ClassMenuOnly = false;
+                LockCursorIfFocused();
+            }
+        }
+
+        private static void LockCursorIfFocused()
+        {
+            if (!Application.isFocused) return;
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
         }
 
         /// <summary>Team wählen (<see cref="Team.None"/> = automatisch). Das Menü schließt, wenn der Server zustimmt.</summary>
@@ -476,11 +534,8 @@ namespace AoS2.Client
                     _hadTeam = true;
                     Feed.ShowTeamMessage($"Du spielst jetzt für Team {TeamName(e.Team)}.");
                     TeamMenuOpen = false;
-                    if (Application.isFocused)
-                    {
-                        Cursor.lockState = CursorLockMode.Locked; // direkt weiterspielen
-                        Cursor.visible = false;
-                    }
+                    ClassMenuOnly = false;
+                    LockCursorIfFocused(); // direkt weiterspielen
                     break;
                 case WorldEventType.TeamDenied:
                     Feed.ShowTeamMessage(e.DenyReason switch
@@ -563,7 +618,8 @@ namespace AoS2.Client
             return Session.RemotePlayers.TryGetValue(id, out var p) ? p.Name : "?";
         }
 
-        public string WeaponName(byte slot) => Combat.Weapon(slot)?.DisplayName ?? "Spaten";
+        /// <summary>Name einer Waffe nach ihrer ID (so steht sie in den Ereignissen), 0 = Spaten.</summary>
+        public string WeaponName(byte id) => Combat.Weapon(id)?.DisplayName ?? "Spaten";
 
         private Vector3? PositionOf(byte id)
         {
@@ -604,7 +660,7 @@ namespace AoS2.Client
         {
             camera.nearClipPlane = 0.05f;
             camera.farClipPlane = 400f;
-            camera.fieldOfView = 75f;
+            camera.fieldOfView = LocalPlayer.FieldOfView;
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Linear;
             RenderSettings.fogColor = new Color(0.62f, 0.72f, 0.82f);

@@ -27,22 +27,31 @@ namespace AoS2.Shared.Net.Client
         private readonly PlayerState[] _states = new PlayerState[HistorySize];
         private readonly WeaponState[] _weapons = new WeaponState[HistorySize];
         private readonly VoxelWorld _world;
-        private readonly MovementSettings _settings;
-        private readonly CombatSettings _combat;
         private readonly MapZones _zones;
 
-        /// <param name="combat">Waffenwerte; <c>null</c> = ohne Waffen (nur Bewegung).</param>
+        /// <summary>Nur Bewegung, ohne Waffen.</summary>
+        public ClientPrediction(VoxelWorld world, MovementSettings settings, PlayerState start, MapZones zones = null)
+            : this(world, new PlayerClass("none", settings, null, null), start, zones)
+        {
+        }
+
+        /// <param name="cls">Klasse des Spielers: Bewegung (Tempo, Kollisionshöhe) und Waffen.</param>
         /// <param name="zones">Zonen der Map (unsichtbare Wände, kein Feuern im Spawn); <c>null</c> = keine.</param>
-        public ClientPrediction(VoxelWorld world, MovementSettings settings, PlayerState start, CombatSettings combat = null, MapZones zones = null)
+        public ClientPrediction(VoxelWorld world, PlayerClass cls, PlayerState start, MapZones zones = null)
         {
             _world = world;
-            _settings = settings;
-            _combat = combat;
+            Class = cls;
             _zones = zones ?? MapZones.None;
             State = start;
             _states[0] = start;
-            if (combat != null) Weapons = _weapons[0] = WeaponState.Full(combat);
+            Weapons = _weapons[0] = WeaponState.Full(cls);
         }
+
+        /// <summary>
+        /// Klasse, mit der gerechnet wird. Sie ändert sich nur beim Respawn; der Snapshot sagt, welche nach der bestätigten
+        /// Eingabe gilt (<see cref="Snapshot.OwnClass"/>), und die Session setzt sie vor dem Abgleich.
+        /// </summary>
+        public PlayerClass Class { get; set; }
 
         /// <summary>Eigenes Team: Die Spawnzone des Gegners ist eine Wand (wie auf dem Server).</summary>
         public Team Team { get; set; }
@@ -81,8 +90,8 @@ namespace AoS2.Shared.Net.Client
 
         private PlayerState Simulate(PlayerState state, ref WeaponState weapons, PlayerInput input, out int firedSlot)
         {
-            state = PlayerMovement.Step(state, input, _world, _settings, _zones.BarriersFor(Team));
-            firedSlot = _combat != null ? WeaponSim.Step(ref weapons, input, _combat, _zones.InSpawnZone(state.Position)) : 0;
+            state = PlayerMovement.Step(state, input, _world, Class.Movement, _zones.BarriersFor(Team));
+            firedSlot = WeaponSim.Step(ref weapons, input, Class, _zones.InSpawnZone(state.Position));
             return state;
         }
 
@@ -105,7 +114,6 @@ namespace AoS2.Shared.Net.Client
         {
             if (ackTick < AckedTick || ackTick > Tick) return Vec3.Zero; // veraltet oder unmöglich
             var before = State;
-            if (_combat == null) serverWeapons = default;
 
             if (Tick - ackTick >= HistorySize)
             {

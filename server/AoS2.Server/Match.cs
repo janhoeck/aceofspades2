@@ -68,7 +68,7 @@ public sealed partial class Match
         Falling = new FallingBlocks(World, content.Movement.Gravity, content.Movement.MaxFallSpeed) { Anchor = Zones.IsAnchor };
         _info = NewMatchInfo(1);
         BlockDamage = new BlockDamage(World, content.Registry);
-        _pose = new PlayerPose(content.Rig);
+        _pose = new PlayerPose(content.Rig, content.Combat.MinHitboxPixels);
 
         // Jede Änderung seit Matchbeginn merken: Wer später beitritt, bekommt genau diese Liste.
         World.BlockChanged += (x, y, z, _, newId) => _changes[Key(x, y, z)] = newId;
@@ -106,7 +106,8 @@ public sealed partial class Match
     // ---- Beitreten und Verlassen ----
 
     /// <summary>
-    /// Nimmt einen Spieler auf und schickt ihm alles für den Start: Begrüßung (Map-ID, Prüfsumme, Startpunkt), den Stand
+    /// Nimmt einen Spieler auf und schickt ihm alles für den Start: die Spielregeln (Bewegung, Kampf, Waffen, Klassen), die
+    /// Begrüßung (Map-ID, Prüfsumme, Startpunkt), den Stand
     /// des Matches, alle Blockänderungen seit Matchbeginn, fallende Gruppen und die anderen Spieler mit Team und Kills.
     /// Der Neue ist noch in keinem Team: Er schaut über der Mitte der Map zu, bis er eins wählt (<see cref="SelectTeam"/>).
     /// </summary>
@@ -120,11 +121,17 @@ public sealed partial class Match
         var player = new ServerPlayer(id, accountId, name, spawn)
         {
             Health = 0,
-            WeaponsState = WeaponState.Full(_content.Combat),
+            Class = _content.Classes.None,
+            WeaponsState = WeaponState.Full(_content.Classes.None),
             AnimationState = PlayerAnimator.Start(_content.Rig, Tick),
         };
         player.RecordView(Tick, ViewOf(player));
         onCreated?.Invoke(player); // der Transport ordnet die Verbindung zu, bevor die erste Nachricht rausgeht
+
+        // Zuerst die Regeln: Der Client rechnet damit Vorhersage und Anzeige, auch wenn der Betreiber sie geändert hat.
+        _scratch.Clear();
+        _content.Rules.Files.Write(_scratch);
+        _output.Send(id, _scratch, Delivery.ReliableOrdered);
 
         var welcome = new Welcome
         {
@@ -222,6 +229,11 @@ public sealed partial class Match
                 case MessageType.TeamSelect:
                     SelectTeam(player, TeamSelectRequest.Read(r).Team);
                     return true;
+                case MessageType.ClassSelect:
+                    var cls = _content.Classes.Get(ClassSelectRequest.Read(r).Class);
+                    if (cls == null || cls == _content.Classes.None) throw new ProtocolException("Diese Klasse gibt es auf dem Server nicht.");
+                    SelectClass(player, cls);
+                    return true;
                 default:
                     throw new ProtocolException($"Unbekannte Nachricht {(byte)type}.");
             }
@@ -287,8 +299,8 @@ public sealed partial class Match
                 if (!p.Alive || MatchOver) input.Buttons = InputButtons.None;
                 p.Budget--;
                 p.LastProcessedTick++;
-                p.State = PlayerMovement.Step(p.State, input, World, _content.Movement, Zones.BarriersFor(p.Team));
-                var fired = WeaponSim.Step(ref p.WeaponsState, input, _content.Combat, Zones.InSpawnZone(p.State.Position));
+                p.State = PlayerMovement.Step(p.State, input, World, p.Class.Movement, Zones.BarriersFor(p.Team));
+                var fired = WeaponSim.Step(ref p.WeaponsState, input, p.Class, Zones.InSpawnZone(p.State.Position));
                 p.LastInput = input;
                 p.Remember(p.LastProcessedTick, p.State, input);
                 if (fired != 0) Fire(p, fired, input);
@@ -303,7 +315,7 @@ public sealed partial class Match
         // Pose und Ansicht jedes Spielers zu diesem Tick merken: Gegen sie prüft der Lag-Ausgleich spätere Schüsse.
         foreach (var p in _players.Values)
         {
-            PlayerAnimator.Update(ref p.AnimationState, _content.Rig, p.State, _content.Movement, Tick);
+            PlayerAnimator.Update(ref p.AnimationState, _content.Rig, p.State, p.Class.Movement, Tick);
             p.RecordView(Tick, ViewOf(p));
         }
 
@@ -330,6 +342,8 @@ public sealed partial class Match
         if (result == BlockEditResult.Ok)
         {
             p.LastEditTick = e.Tick;
+            // Blockvorrat: Bauen kostet einen Block, Abbauen gibt einen zurück (höchstens so viele, wie die Klasse trägt).
+            p.Blocks = e.Kind == BlockEditKind.Place ? p.Blocks - 1 : Math.Min(p.Blocks + 1, p.Class.Blocks);
             var id = e.Kind == BlockEditKind.Remove ? BlockRegistry.Air : e.BlockId;
             World.SetBlock(e.X, e.Y, e.Z, id);
             _scratch.Clear();
@@ -344,13 +358,13 @@ public sealed partial class Match
 
         // Die Antwort kommt nach der Änderung: So weiß der Client, was laut Server dort steht, wenn er seine Vorhersage auflöst.
         BeginEvent(p.Id);
-        WorldEvents.WriteEditResult(_events[p.Id], e.Seq, result);
+        WorldEvents.WriteEditResult(_events[p.Id], e.Seq, result, p.Blocks);
     }
 
     /// <summary>
-    /// Prüft eine Blockaktion mit dem Zustand des Spielers zu ihrem Eingabe-Tick: Pause seit der letzten Aktion,
+    /// Prüft eine Blockaktion mit dem Zustand des Spielers zu ihrem Eingabe-Tick: Pause seit der letzten Aktion (je Klasse),
     /// Sichtlinie (der Strahl vom Auge in Blickrichtung trifft genau diesen Block), Reichweite und die Regeln aus
-    /// <see cref="BlockEditing"/>. Beim Bauen darf auch kein anderer Spieler im Weg stehen.
+    /// <see cref="BlockEditing"/>. Beim Bauen braucht man einen Block im Vorrat, und kein anderer Spieler darf im Weg stehen.
     /// </summary>
     private BlockEditResult CheckEdit(ServerPlayer p, BlockEditRequest e)
     {
@@ -363,9 +377,9 @@ public sealed partial class Match
         }
         if (!p.Alive) return BlockEditResult.Dead;
         if (MatchOver) return BlockEditResult.MatchOver;
-        if (p.LastEditTick is { } last && e.Tick < last + BlockEditing.CooldownTicks) return BlockEditResult.TooFast;
+        if (p.LastEditTick is { } last && e.Tick < last + p.Class.EditCooldownTicks) return BlockEditResult.TooFast;
 
-        var movement = _content.Movement;
+        var movement = p.Class.Movement;
         var eye = state.Position + new Vec3(0, movement.EyeHeight(state.Crouching), 0);
         if (!VoxelRaycast.Cast(World, eye, PlayerMovement.LookDirection(input.Yaw, input.Pitch), BlockEditing.Reach, out var hit))
             return BlockEditResult.OutOfReach;
@@ -379,9 +393,13 @@ public sealed partial class Match
         if (hit.PlaceX != e.X || hit.PlaceY != e.Y || hit.PlaceZ != e.Z) return BlockEditResult.NoLineOfSight;
         var result = BlockEditing.CanPlace(World, _content.Registry, e.X, e.Y, e.Z, e.BlockId, hit.Distance, state, movement, Zones);
         if (result != BlockEditResult.Ok) return result;
+        if (p.Blocks <= 0) return BlockEditResult.NoBlocks;
         foreach (var other in _players.Values)
-            if (other != p && PlayerMovement.OverlapsBlock(other.State.Position, movement.HalfWidth, movement.Height(other.State.Crouching), e.X, e.Y, e.Z))
+        {
+            var m = other.Class.Movement;
+            if (other != p && PlayerMovement.OverlapsBlock(other.State.Position, m.HalfWidth, m.Height(other.State.Crouching), e.X, e.Y, e.Z))
                 return BlockEditResult.BlockedByPlayer;
+        }
         return BlockEditResult.Ok;
     }
 
@@ -397,6 +415,7 @@ public sealed partial class Match
         s.OwnHealth = (byte)to.Health;
         s.OwnRespawnTicks = to.Alive || to.Team == Team.None || to.RespawnAt <= Tick ? (ushort)0 : (ushort)Math.Min(to.RespawnAt - Tick, ushort.MaxValue);
         s.OwnLife = to.Life;
+        s.OwnClass = to.Class.Id;
         s.Players.Clear();
         s.Falling.Clear();
 

@@ -15,7 +15,8 @@ namespace AoS2.Server.Tests;
 /// </summary>
 public class TeamDeathmatchTests
 {
-    private const byte Rifle = 1, Rocket = 3;
+    /// <summary>Plätze: Assault hat das Gewehr auf 1, der Rocketeer den Raketenwerfer auf 1 und die Pistole auf 2.</summary>
+    private const byte Rifle = 1, Launcher = 1, Pistol = 2;
 
     /// <summary>Freies Feld weit weg von Spawnzonen und Säule.</summary>
     private static readonly Vec3 Field = new(40.5f, 4, 40.5f);
@@ -330,7 +331,7 @@ public class TeamDeathmatchTests
     {
         var net = new SimulatedNetwork();
         var a = net.Join("Anna", Team.Blue);
-        var b = net.Join("Ben", Team.Green);
+        var b = net.Join("Ben", Team.Green, TestArena.Rocketeer);
         Assert.True(net.RunUntil(() => a.Ready && b.Ready));
         var reports = new List<ShotReport>();
         net.Match.ShotResolved += reports.Add;
@@ -347,7 +348,7 @@ public class TeamDeathmatchTests
         Assert.Equal(100, net.ServerPlayer(b).Health);
 
         // Ben schießt in den Spawn hinein: Der Schuss endet an der Zonengrenze (z = 17), Anna bleibt heil.
-        b.Input.Weapon = Rifle;
+        b.Input.Weapon = Pistol;
         net.Run(0.5);
         b.LookAt(net.ServerPlayer(a).State.Position + new Vec3(0, 1, 0));
         b.FireTicks = 12;
@@ -358,7 +359,7 @@ public class TeamDeathmatchTests
         Assert.Equal(100, net.ServerPlayer(a).Health);
 
         // Eine Rakete explodiert an der Zonengrenze; wer im Spawn steht, bekommt nichts ab.
-        b.Input.Weapon = Rocket;
+        b.Input.Weapon = Launcher;
         net.Run(0.5);
         b.LookAt(net.ServerPlayer(a).State.Position + new Vec3(0, 0.5f, 0));
         b.FireTicks = 1;

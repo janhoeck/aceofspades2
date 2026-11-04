@@ -11,12 +11,13 @@ namespace AoS2.LoadTest;
 
 /// <summary>
 /// Ein simulierter Spieler: echte <see cref="ClientSession"/> und <see cref="NetClient"/> wie im Spiel, nur die Eingaben kommen
-/// von einer einfachen Steuerung. Er wählt automatisch ein Team, läuft Richtung Kartenmitte, springt ab und zu, schießt mit
-/// dem Gewehr auf den nächsten sichtbaren Gegner, wirft gelegentlich Granaten, schießt Raketen und gräbt Blöcke ab.
+/// von einer einfachen Steuerung. Er wählt eine zufällige Klasse und automatisch ein Team, läuft Richtung Kartenmitte, springt
+/// ab und zu, schießt mit der ersten Waffe seiner Klasse auf den nächsten sichtbaren Gegner, nimmt gelegentlich eine andere
+/// (Granaten, Pistole …) und gräbt Blöcke ab.
 /// </summary>
 public sealed class Bot : IDisposable
 {
-    private const byte Spade = 0, Rifle = 1, Grenade = 2, Rocket = 3;
+    private const byte Spade = 0, Primary = 1;
 
     private readonly Random _random;
     private readonly Func<double> _clock;
@@ -34,7 +35,7 @@ public sealed class Bot : IDisposable
         _clock = clock;
         _random = new Random(seed);
         Net = new NetClient();
-        Session = new ClientSession(content.Registry, content.Movement, map => map == content.MapName ? content.MapFileBytes : null, Net, clock, content.Combat);
+        Session = new ClientSession(content.Registry, content.Rules, content.RigJson, map => map == content.MapName ? content.MapFileBytes : null, Net, clock);
         Session.CombatEvent += e =>
         {
             if (e.Type == WorldEventType.PlayerKilled && e.Attacker == Session.PlayerId && e.PlayerId != e.Attacker) Kills++;
@@ -63,6 +64,8 @@ public sealed class Bot : IDisposable
         Session.Update();
         if (Session.Phase == ClientPhase.Playing && !_teamRequested)
         {
+            var classes = Session.Classes.All;
+            Session.RequestClass(classes[_random.Next(classes.Count)]);
             Session.RequestTeam(Team.None);
             _teamRequested = true;
             _goal = MapCenter();
@@ -90,14 +93,13 @@ public sealed class Bot : IDisposable
         Input.Buttons = InputButtons.Forward;
         if (_random.Next(90) == 0) Input.Buttons |= InputButtons.Jump;
 
-        // Ab und zu etwas anderes: Granate, Rakete oder Graben.
+        // Ab und zu etwas anderes: eine andere Waffe der Klasse oder Graben.
         if (_ticks >= _specialUntil && _random.Next(600) == 0)
         {
-            var pick = _random.Next(3);
-            _special = pick == 0 ? Grenade : pick == 1 ? Rocket : Spade;
+            _special = (byte)_random.Next(Session.Class.SlotCount + 1); // 0 = Spaten
             _specialUntil = (int)_ticks + 60;
         }
-        var weapon = _ticks < _specialUntil ? _special : Rifle;
+        var weapon = _ticks < _specialUntil ? _special : Primary;
 
         var target = NearestEnemy(me.Position, out var distance);
         if (target != null && weapon != Spade)

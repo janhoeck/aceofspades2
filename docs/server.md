@@ -47,25 +47,26 @@ Ein zweiter Rechner im selben Netz verbindet sich mit der IP-Adresse des Server-
 
 ### 1.5 Gegeneinander kämpfen (seit M5)
 
+Seit M8 trägt jede Klasse eigene Waffen (Abschnitt 1.7). Die Beispiele hier gehen vom **Assault** aus, der Standardklasse.
+
 | Taste | Aktion |
 |---|---|
 | 1 | Spaten: Linksklick abbauen, Rechtsklick bauen, **B** wechselt den Baublock |
-| 2 | Sturmgewehr (Linksklick gedrückt halten: Dauerfeuer) |
-| 3 | Granate (ein Klick = ein Wurf, explodiert nach 3 s) |
-| 4 | Raketenwerfer (explodiert beim Aufprall) |
+| 2 … 5 | Waffen der Klasse, beim Assault: **2** Sturmgewehr (gedrückt halten: Dauerfeuer), **3** Pistole, **4** Granate (ein Klick = ein Wurf, explodiert nach 3 s) |
 | Mausrad | Waffe wechseln |
 | R | nachladen (leere Magazine laden von selbst nach) |
+| Rechtsklick (mit Waffe) | Zielfernrohr (Scharfschützengewehr des Recon) |
 
 So probiert man alles aus:
 
 1. Beide Clients verbunden (Abschnitt 1.2 und 1.3), beide Fenster nebeneinander. Einer wählt Blau, der andere Grün (zwei in einem Team lässt der Ausgleich nicht zu, siehe 1.6). Beide laufen aus ihrem Spawn auf der Straße aufeinander zu: Im Spawn feuert keine Waffe.
 2. Im einen Fenster **2** drücken, auf den anderen Spieler zielen und schießen. Bei jedem Treffer erscheint um das Fadenkreuz ein Kreuz (gelb bei Kopfschuss, rot beim tödlichen Treffer), der Getroffene leuchtet kurz auf, sein Bildschirm bekommt einen roten Rand auf der Seite des Schützen und unten links sinkt sein Leben. Rumpf 25, Kopf 50, Arme/Beine 17 Schaden; 100 Leben.
 3. Bei 0 Leben zerfällt der Getroffene in Würfel; oben rechts steht der Kill. Er selbst sieht „Getötet von …“ und einen Countdown und erscheint nach **5 Sekunden** an einem Spawnpunkt mit vollem Leben und voller Munition.
-4. Mit **4** eine Rakete auf eine Wand oder einen Turm schießen: Blöcke im Umkreis verschwinden, Ränder bekommen Risse, freistehende Teile fallen herunter. Spieler in der Nähe nehmen Schaden, auch man selbst.
-5. Mit **3** eine Granate werfen: Sie prallt ab, bleibt liegen und explodiert nach 3 Sekunden.
+4. Als **Rocketeer** (Klasse wählen mit **K**, Abschnitt 1.7) mit **2** eine Rakete auf eine Wand oder einen Turm schießen: Blöcke im Umkreis verschwinden, Ränder bekommen Risse, freistehende Teile fallen herunter. Spieler in der Nähe nehmen Schaden, auch man selbst.
+5. Mit **4** eine Granate werfen: Sie prallt ab, bleibt liegen und explodiert nach 3 Sekunden.
 6. Ein paar Schüsse mit dem Gewehr auf einen Block: Er bekommt Risse und bricht nach einigen Treffern (Erde und Gras eher, Stein später).
 
-Werte (Schaden, Feuerrate, Magazine, Explosionsradius, Respawn-Zeit, Trefferzonen) stehen in `data/weapons.json` und `data/combat.json`. Nach einer Änderung Server **und** Spiel neu starten: Der Server entscheidet, das Spiel nutzt die Werte für die Vorhersage (Munition, Feuerrate) und die Anzeige.
+Werte (Schaden, Feuerrate, Magazine, Explosionsradius, Respawn-Zeit, Trefferzonen) stehen in `data/weapons.json`, `data/classes.json` und `data/combat.json`. Nach einer Änderung reicht es seit M8, den **Server** neu zu starten: Er schickt seine Werte beim Beitritt an jedes Spiel, das damit Vorhersage (Munition, Feuerrate, Tempo) und Anzeige rechnet. Nachjustieren beim Playtest: Abschnitt 1.8.
 
 Den **Lag-Ausgleich** sieht man am besten mit einem zweiten Rechner oder künstlicher Verzögerung: Man trifft den anderen dort, wo man ihn sieht, obwohl er auf dem Server schon ein Stück weiter ist. Wie das funktioniert: [architecture.md, Abschnitt Kampf](architecture.md#kampf-seit-m5).
 
@@ -88,7 +89,43 @@ Den **Lag-Ausgleich** sieht man am besten mit einem zweiten Rechner oder künstl
 
 Mehr als zwei Clients auf einem Rechner: den Windows-Build mehrmals starten (`AoS2.exe -connect 127.0.0.1:32887 -name Dritter -devticket`). Viele Spieler auf einmal simuliert der Lasttest (Abschnitt 6).
 
-### 1.7 Mit echter Anmeldung (lokales Backend)
+### 1.7 Klassen ausprobieren (seit M8)
+
+| Taste | Aktion |
+|---|---|
+| K | Klassenwahl (nur die Klassen) |
+| M | Menü „Klasse und Team“ |
+| Rechtsklick | mit dem Scharfschützengewehr: Zielfernrohr (4-fach) |
+
+| Klasse | 2 | 3 | 4 | Blöcke | Besonders |
+|---|---|---|---|---|---|
+| Miner | MP | Granate ×3 | – | 100 | gräbt und baut doppelt so schnell (0,1 s Pause), Helm mit Lampe |
+| Assault | Sturmgewehr | Pistole | Granate ×3 | 50 | Standardklasse, Helm und Weste |
+| Recon | Scharfschützengewehr (Zielfernrohr) | Pistole | – | 30 | 10 % schneller, Hut, Entfernungsmesser, Funkgerät |
+| Rocketeer | Raketenwerfer (1 + 5) | Pistole | – | 30 | 10 % langsamer, Raketenhelm, Schulterpolster, Raketen-Rucksack |
+
+1. Server starten (1.1) und zwei Clients verbinden (1.2 und 1.3). Nach dem Beitritt zeigt das Menü oben die vier Klassen als Karten (Waffen, Blöcke, Tempo, Rumpftreffer bis zum Tod) und unten die Teams. Erst eine Klasse anklicken, dann ein Team: Man erscheint gleich mit dieser Klasse. Wer nur ein Team anklickt, spielt die markierte Standardklasse Assault.
+2. Im anderen Fenster sieht man den Spieler mit der Ausrüstung seiner Klasse (Helm, Weste, Rucksack …). Genau diese Teile sind auch Trefferzonen: Ein Schuss in den Raketen-Rucksack trifft den Rumpf, ein Schuss knapp über den Kopf trifft den Helm (Kopf). Nur die 2,5 cm dünne Antenne des Recon ist reine Optik.
+3. **K** drücken und eine andere Klasse wählen: Oben steht „Ab dem nächsten Spawn spielst du …“, unten links „Nächster Spawn: …“. Man behält Klasse, Waffen und Munition bis zum nächsten Tod (oder Teamwechsel mit **M**) und erscheint dann mit der neuen. Tot gewählt: Man erscheint beim Respawn gleich mit ihr.
+4. **Blockvorrat:** Mit dem Spaten steht unten rechts die Zahl der Blöcke. Jeder gebaute Block kostet einen, jeder abgebaute gibt einen zurück (höchstens so viele, wie die Klasse trägt). Sind alle verbaut, erscheint „Keine Blöcke mehr …“. Der Respawn füllt auf.
+5. **Recon:** **2**, dann rechte Maustaste halten: Zielfernrohr. Ein Kopfschuss tötet, zwei Rumpftreffer auch. Der Recon läuft spürbar schneller, der Rocketeer langsamer.
+6. **Miner:** Mit gedrückter linker Maustaste einen Tunnel graben: doppelt so schnell wie die anderen. Die MP ist aus der Nähe stark, verliert aber ab 20 Blöcken an Schaden.
+7. **Tab:** Die Punktetabelle zeigt die Klasse jedes Spielers.
+
+### 1.8 Werte nachjustieren (Balancing)
+
+1. Werte in `data/weapons.json` (Schaden, Feuerrate, Magazin, Abfall über die Entfernung, Explosionen), `data/classes.json` (Waffen je Klasse, Blöcke, Grab-Pause, Tempo, Leben) oder `data/combat.json` (Zonenfaktoren, Leben, Respawn) ändern. Jeder Eintrag ist am Anfang der Datei unter `_comment` erklärt.
+2. Tabelle neu rechnen und ansehen: Treffer bis zum Tod und Zeit bis zum Tod je Waffe, Zone und Entfernung.
+   ```powershell
+   dotnet run --project tools/AoS2.Balance -- --out docs/balancing.md
+   ```
+   Ohne `--out` erscheint sie im Terminal, `--distances 0,10,30` wählt andere Entfernungen. Ungültige Werte (unbekannte Waffe, Magazin 0, Klasse doppelt …) meldet das Werkzeug genau wie der Server mit Datei, Eintrag und Grund.
+3. Server neu starten. Die Spiele bekommen die neuen Werte beim nächsten Beitritt vom Server; ein neues Spiel-Update ist nicht nötig (ein Self-Hoster kann so auch eigene Werte spielen).
+4. Beim Playtest notieren, was sich falsch anfühlt („MP auf 30 Blöcke zu stark“), Wert ändern, Tabelle prüfen, Server neu starten.
+
+Die Zahlen und Begründungen der ersten Werte stehen in [game-design.md, Abschnitt Balancing](game-design.md#balancing), die aktuelle Tabelle in [balancing.md](balancing.md).
+
+### 1.9 Mit echter Anmeldung (lokales Backend)
 
 Läuft das lokale Backend mit Website ([backend.md](backend.md#3-lokal-entwickeln)), kann der Server echte Join-Tickets prüfen:
 
@@ -166,7 +203,7 @@ Status: 6 Spieler (Blau 3, Grün 3), Punkte 12 : 9, Tick Ø 0.08 ms / max 1.2 ms
 1. Der Client holt ein Join-Ticket (vom Backend oder als Entwicklungs-Ticket) und schickt es mit der Protokollversion in der Verbindungsanfrage.
 2. Der Server lehnt sofort ab, wenn die Protokollversion nicht passt oder der Server voll ist. Sonst prüft er das Ticket (Signatur, Aussteller, Zielserver, Ablauf) und dass es noch nicht benutzt wurde.
 3. Ist dasselbe Konto schon im Spiel, wird die alte Verbindung getrennt.
-4. Der Server schickt die Begrüßung: Spieler-ID, Map-Name, SHA-256 der Map-Datei, Spawn. Der Client lädt die Map aus seinem `maps`-Ordner und vergleicht die Prüfsumme; passt sie nicht, trennt er mit der Meldung, das Spiel zu aktualisieren.
+4. Der Server schickt zuerst seine Spielregeln (`movement.json`, `combat.json`, `weapons.json`, `classes.json` als Text, seit M8), dann die Begrüßung: Spieler-ID, Map-Name, SHA-256 der Map-Datei, Spawn. Der Client lädt die Map aus seinem `maps`-Ordner und vergleicht die Prüfsumme; passt sie nicht, trennt er mit der Meldung, das Spiel zu aktualisieren.
 5. Danach kommen alle Blockänderungen seit Matchbeginn, gerade fallende Blockgruppen und die anderen Spieler. Erst dann beginnt der Client zu spielen.
 
 Abgelehnte Clients bekommen immer einen Grund (Protokoll, Ticket, voll, …), der im Startmenü steht.

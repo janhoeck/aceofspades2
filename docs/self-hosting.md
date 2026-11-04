@@ -202,5 +202,6 @@ Die Config bleibt gleich; neue Einträge sind immer optional.
 ## 8. Was du als Betreiber wissen solltest
 
 - Dein Server entscheidet alles im Spiel: Treffer, Blöcke, Punkte. Spieler müssen dir dabei nicht vertrauen, was ihre Anmeldung angeht: Dein Server sieht nur ein Join-Ticket mit Konto-ID und Discord-Namen, nie ein Passwort oder Sitzungstoken.
+- Waffen- und Klassenwerte kannst du in `data/weapons.json`, `data/classes.json` und `data/combat.json` neben dem Server ändern (z. B. mehr Blöcke für alle). Nach einem Neustart bekommen die Spieler deine Werte beim Beitritt automatisch, sie brauchen kein anderes Spiel. Ungültige Werte meldet der Server beim Start mit Datei und Eintrag. Was die Werte bedeuten und wie man sie prüft: [server.md, Abschnitt 1.8](server.md#18-werte-nachjustieren-balancing). Beim Aktualisieren des Servers werden die Dateien überschrieben, heb deine Änderungen also auf.
 - Statistiken oder Ranglisten (falls es sie einmal gibt) zählen nur auf offiziellen Servern.
 - Offizielle Server stehen im Browser oben und tragen einen Stern. Wie sie betrieben werden: [backend.md, Abschnitt 4.6](backend.md#46-offizielle-spielserver).

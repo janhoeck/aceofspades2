@@ -43,12 +43,23 @@ internal static class TestArena
         ] }
         """);
 
-    public static MovementSettings Movement { get; } = new();
+    public static string RigJson { get; } = File.ReadAllText(RepoFile("data/player_rig.json"));
 
-    /// <summary>Kampfregeln, Waffen und Spielermodell aus dem echten data/-Ordner.</summary>
-    public static CombatSettings Combat { get; } = CombatSettings.Parse(File.ReadAllText(RepoFile("data/combat.json")), File.ReadAllText(RepoFile("data/weapons.json")), 60);
+    /// <summary>Spielregeln (Bewegung, Kampf, Waffen, Klassen) und Spielermodell aus dem echten data/-Ordner.</summary>
+    public static GameRules Rules { get; } = GameRules.Parse(GameDataFiles.Load(name => File.ReadAllText(RepoFile("data/" + name))), RigJson);
 
-    public static PlayerRig Rig { get; } = PlayerRig.Parse(File.ReadAllText(RepoFile("data/player_rig.json")));
+    /// <summary>Bewegung ohne Klasse (Zuschauer).</summary>
+    public static MovementSettings Movement => Rules.Movement;
+
+    public static CombatSettings Combat => Rules.Combat;
+    public static PlayerClasses Classes => Rules.Classes;
+
+    public static PlayerClass Miner => Classes.Find("miner")!;
+    public static PlayerClass Assault => Classes.Find("assault")!;
+    public static PlayerClass Recon => Classes.Find("recon")!;
+    public static PlayerClass Rocketeer => Classes.Find("rocketeer")!;
+
+    public static PlayerRig Rig { get; } = PlayerRig.Parse(RigJson);
 
     public static GameContent Content { get; } = CreateContent();
 
@@ -78,13 +89,13 @@ internal static class TestArena
 
         using var file = new MemoryStream();
         MapFile.Write(file, world, metadata, Registry);
-        return new GameContent(Registry, Movement, Combat, Rig, MapName, file.ToArray());
+        return new GameContent(Registry, Rules, RigJson, MapName, file.ToArray());
     }
 
-    /// <summary>Blickwinkel vom Auge eines stehenden Spielers bei <paramref name="feet"/> auf einen Punkt.</summary>
-    public static (float Yaw, float Pitch) Aim(Vec3 feet, Vec3 target)
+    /// <summary>Blickwinkel vom Auge eines stehenden Spielers bei <paramref name="feet"/> auf einen Punkt (Augenhöhe je Klasse, sonst Assault).</summary>
+    public static (float Yaw, float Pitch) Aim(Vec3 feet, Vec3 target, PlayerClass? cls = null)
     {
-        var eye = feet + new Vec3(0, new MovementSettings().EyeHeight(false), 0);
+        var eye = feet + new Vec3(0, (cls ?? Assault).Movement.EyeHeight(false), 0);
         double dx = target.X - eye.X, dy = target.Y - eye.Y, dz = target.Z - eye.Z;
         var yaw = Math.Atan2(dx, dz) * 180 / Math.PI;
         if (yaw < 0) yaw += 360;
@@ -129,9 +140,9 @@ internal sealed class SimulatedNetwork : IMatchOutput
 
     /// <summary>
     /// Ein Client tritt bei und wählt gleich ein Team (<see cref="Team.None"/> = automatisch, also abwechselnd Blau und Grün;
-    /// <c>null</c> = bleibt Zuschauer).
+    /// <c>null</c> = bleibt Zuschauer). <paramref name="cls"/> wählt vorher die Klasse (sonst die Standardklasse Assault).
     /// </summary>
-    public TestClient Join(string name, Team? team = Team.None)
+    public TestClient Join(string name, Team? team = Team.None, PlayerClass? cls = null)
     {
         var client = new TestClient(this, name);
         var player = Match.AddPlayer(Guid.NewGuid(), name, p =>
@@ -140,6 +151,7 @@ internal sealed class SimulatedNetwork : IMatchOutput
             _byPlayer[p.Id] = client;
         });
         _clients.Add(client);
+        if (cls != null) Match.SelectClass(player, cls);
         if (team is { } wish) Assert.Null(Match.SelectTeam(player, wish));
         return client;
     }
@@ -256,8 +268,9 @@ internal sealed class TestClient : IMessageSender
         _net = net;
         Name = name;
         var content = net.Content;
-        Session = new ClientSession(content.Registry, content.Movement,
-            map => map == content.MapName ? content.MapFileBytes : null, this, () => net.Time, content.Combat);
+        // Der Client startet mit den eigenen Dateien aus data/; die Regeln des Servers kommen beim Beitritt (GameData).
+        Session = new ClientSession(content.Registry, TestArena.Rules, TestArena.RigJson,
+            map => map == content.MapName ? content.MapFileBytes : null, this, () => net.Time);
         Session.EditRejected += result => Rejected.Add(result);
         Session.CombatEvent += e => Events.Add(e);
         Session.MatchEvent += e => MatchEvents.Add(e);
@@ -323,7 +336,7 @@ internal sealed class TestClient : IMessageSender
         _afterTick.Clear();
     }
 
-    public void LookAt(Vec3 target) => (Input.Yaw, Input.Pitch) = TestArena.Aim(State.Position, target);
+    public void LookAt(Vec3 target) => (Input.Yaw, Input.Pitch) = TestArena.Aim(State.Position, target, Session.Class.Id == 0 ? null : Session.Class);
 
     /// <summary>Strahl aus dem Auge wie im echten Client.</summary>
     public bool Target(out VoxelHit hit)

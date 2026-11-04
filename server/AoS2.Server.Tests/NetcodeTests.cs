@@ -44,7 +44,7 @@ public class NetcodeTests
         var content = TestArena.Content;
         var bytes = (byte[])content.MapFileBytes.Clone();
         bytes[^1] ^= 0xFF; // andere Datei, gleicher Name
-        var session = new ClientSession(content.Registry, content.Movement, _ => bytes, new NullSender(), () => 0);
+        var session = new ClientSession(content.Registry, content.Rules, content.RigJson, _ => bytes, new NullSender(), () => 0);
 
         var welcome = new AoS2.Shared.Net.NetWriter();
         new AoS2.Shared.Net.Welcome { TickRate = 60, SnapshotInterval = 2, MapName = TestArena.MapName, MapChecksum = content.MapChecksum }.Write(welcome);

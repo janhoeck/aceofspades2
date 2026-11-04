@@ -278,7 +278,8 @@ public class NetSerializerTests
         var w = new NetWriter();
         WorldEvents.WriteHeader(w);
         WorldEvents.WriteBlockSet(w, 1, 2, 3, 4);
-        WorldEvents.WriteEditResult(w, 42, BlockEditResult.NoLineOfSight);
+        WorldEvents.WriteEditResult(w, 42, BlockEditResult.NoLineOfSight, 17);
+        WorldEvents.WriteBlockSupply(w, 99);
         WorldEvents.WriteFallStart(w, 5, blocks, 1.5f, 3.25f);
         WorldEvents.WriteFallLand(w, 5, 7);
         WorldEvents.WritePlayerJoined(w, 2, "Ännchen");
@@ -291,18 +292,19 @@ public class NetSerializerTests
         WorldEvents.Read(r, events);
 
         Assert.Equal(
-            [WorldEventType.BlockSet, WorldEventType.EditResult, WorldEventType.FallStart, WorldEventType.FallLand,
+            [WorldEventType.BlockSet, WorldEventType.EditResult, WorldEventType.BlockSupply, WorldEventType.FallStart, WorldEventType.FallLand,
              WorldEventType.PlayerJoined, WorldEventType.PlayerLeft, WorldEventType.SyncComplete],
             events.Select(e => e.Type));
         Assert.Equal((1, 2, 3, (byte)4), (events[0].X, events[0].Y, events[0].Z, events[0].BlockId));
-        Assert.Equal((42, BlockEditResult.NoLineOfSight), (events[1].Seq, events[1].Result));
-        Assert.Equal(5, events[2].GroupId);
-        Assert.Equal(1.5f, events[2].Fallen);
-        Assert.Equal(3.25f, events[2].Velocity);
-        Assert.Equal(blocks, events[2].Blocks);
-        Assert.Equal((5, 7), (events[3].GroupId, events[3].Offset));
-        Assert.Equal((2, "Ännchen"), (events[4].PlayerId, events[4].Name));
-        Assert.Equal(2, events[5].PlayerId);
+        Assert.Equal((42, BlockEditResult.NoLineOfSight, (ushort)17), (events[1].Seq, events[1].Result, events[1].Supply));
+        Assert.Equal(99, events[2].Supply);
+        Assert.Equal(5, events[3].GroupId);
+        Assert.Equal(1.5f, events[3].Fallen);
+        Assert.Equal(3.25f, events[3].Velocity);
+        Assert.Equal(blocks, events[3].Blocks);
+        Assert.Equal((5, 7), (events[4].GroupId, events[4].Offset));
+        Assert.Equal((2, "Ännchen"), (events[5].PlayerId, events[5].Name));
+        Assert.Equal(2, events[6].PlayerId);
     }
 
     [Fact]

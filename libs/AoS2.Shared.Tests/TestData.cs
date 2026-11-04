@@ -1,3 +1,5 @@
+using AoS2.Shared.Combat;
+using AoS2.Shared.Movement;
 using AoS2.Shared.Voxels;
 
 namespace AoS2.Shared.Tests;
@@ -18,6 +20,16 @@ internal static class TestData
           { "id": 9, "name": "build_blue", "buildable": true, "textures": { "all": "x" } }
         ] }
         """);
+
+    /// <summary>Eine Klasse mit diesen Waffen (Plätze 1, 2 …) und den Standard-Bewegungswerten, für Tests der Waffen-Simulation.</summary>
+    public static PlayerClass Loadout(CombatSettings combat, params string[] weapons) =>
+        new("test", new MovementSettings(), combat, weapons.Select(name => combat.Find(name) ?? throw new ArgumentException(name)));
+
+    /// <summary>Text einer Datei aus data/.</summary>
+    public static string DataFile(string name) => File.ReadAllText(RepoFile("data/" + name));
+
+    /// <summary>Spielregeln aus dem echten data/-Ordner (wie Server und Client sie laden).</summary>
+    public static GameRules RealRules() => GameRules.Parse(GameDataFiles.Load(DataFile), DataFile("player_rig.json"));
 
     /// <summary>Welt mit Grundgestein auf y = 0 und Stein bis einschließlich <paramref name="groundTop"/>.</summary>
     public static VoxelWorld FlatWorld(int sizeX = 32, int sizeY = 32, int sizeZ = 32, int groundTop = 3)

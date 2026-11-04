@@ -28,6 +28,7 @@ namespace AoS2.Shared.Rig
         public const float MaxHeadPitch = 60f;
 
         private readonly PlayerRig _rig;
+        private readonly bool[] _hittable;
         private readonly Mat34[] _bones;
         private readonly Vec3[] _rotation;
         private readonly Vec3[] _position;
@@ -35,9 +36,13 @@ namespace AoS2.Shared.Rig
         private readonly Vec3[] _blendPosition;
         private readonly int _head, _body, _armRight, _armLeft, _lowerRight, _lowerLeft;
 
-        public PlayerPose(PlayerRig rig)
+        /// <param name="minHitboxPixels">Würfel, die in einer Richtung dünner sind (Pixel), sind keine Trefferzone (nur Optik,
+        /// z. B. eine Antenne). <c>minHitboxPixels</c> aus combat.json.</param>
+        public PlayerPose(PlayerRig rig, float minHitboxPixels = 0)
         {
             _rig = rig;
+            _hittable = new bool[rig.Boxes.Count];
+            for (var i = 0; i < _hittable.Length; i++) _hittable[i] = IsThickEnough(rig.Boxes[i], minHitboxPixels);
             var n = rig.Bones.Count;
             _bones = new Mat34[n];
             _rotation = new Vec3[n];
@@ -54,6 +59,19 @@ namespace AoS2.Shared.Rig
         }
 
         public PlayerRig Rig => _rig;
+
+        /// <summary>Ist der Würfel eine Trefferzone (nicht zu dünn)?</summary>
+        public bool IsHittable(int box) => _hittable[box];
+
+        /// <summary>Gehört der Würfel zum Grundkörper oder zur Ausrüstung von <paramref name="gearClass"/>?</summary>
+        public static bool IsWorn(RigBox box, string gearClass) => box.Gear == null || box.Gear == gearClass;
+
+        private static bool IsThickEnough(RigBox box, float min)
+        {
+            var size = box.To - box.From;
+            min -= 0.001f; // Rundung: 4,7 − 3,7 ist als float etwas weniger als 1
+            return Abs(size.X) >= min && Abs(size.Y) >= min && Abs(size.Z) >= min;
+        }
 
         /// <summary>Matrix eines Knochens im Modell (Pixel), nach <see cref="Evaluate"/>.</summary>
         public Mat34 Bone(int index) => _bones[index];
@@ -177,7 +195,8 @@ namespace AoS2.Shared.Rig
         }
 
         /// <summary>
-        /// Strahl gegen die Trefferboxen dieser Pose (Grundkörper plus Ausrüstung von <paramref name="gearClass"/>, <c>null</c> = keine).
+        /// Strahl gegen die Trefferboxen dieser Pose (Grundkörper plus Ausrüstung von <paramref name="gearClass"/>, <c>null</c> = keine;
+        /// ohne zu dünne Würfel, siehe <see cref="IsHittable"/>).
         /// Erst grob gegen die umschließende Kugel, dann gegen jede Box. Liefert die nächste getroffene Box.
         /// </summary>
         public bool Raycast(Vec3 feet, float yaw, string gearClass, Vec3 origin, Vec3 direction, float maxDistance, out float distance, out int box)
@@ -189,7 +208,7 @@ namespace AoS2.Shared.Rig
             var boxes = _rig.Boxes;
             for (var i = 0; i < boxes.Count; i++)
             {
-                if (boxes[i].Gear != null && boxes[i].Gear != gearClass) continue;
+                if (!_hittable[i] || !IsWorn(boxes[i], gearClass)) continue;
                 if (!Geometry.RayObb(origin, direction, BoxInWorld(i, toWorld), distance, out var t)) continue;
                 distance = t;
                 box = i;

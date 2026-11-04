@@ -219,8 +219,11 @@ namespace AoS2.Shared.Net
         /// <summary>Zählt die Leben (+1 bei jedem Respawn): Zwischen zwei Leben wird nicht interpoliert, man springt zum Spawn.</summary>
         public byte Life;
 
-        /// <summary>Gewählter Platz (0 = Spaten), bestimmt die Haltung der Arme.</summary>
+        /// <summary>Gewählter Platz (0 = Spaten), bestimmt die Haltung der Arme und mit <see cref="Class"/> die Waffe in der Hand.</summary>
         public byte Weapon;
+
+        /// <summary>Klassen-ID (<see cref="PlayerClass.Id"/>, 0 = keine): Ausrüstung am Modell und Trefferzonen.</summary>
+        public byte Class;
 
         public AnimationState Animation;
 
@@ -269,7 +272,7 @@ namespace AoS2.Shared.Net
         public const int MaxPlayerBytes = 1 + 12 + 2 + 2 + 1 + 1 + 1 + 3 + 5;
 
         /// <summary>Größe ohne andere Spieler und fallende Gruppen.</summary>
-        public const int HeaderBytes = 1 + 4 + 4 + 25 + 1 + 2 + 1 + (6 + 4 * CombatSettings.MaxWeapons) + 1 + 1;
+        public const int HeaderBytes = 1 + 4 + 4 + 25 + 1 + 2 + 1 + 1 + (6 + 4 * CombatSettings.MaxWeapons) + 1 + 1;
 
         public uint ServerTick;
 
@@ -289,6 +292,12 @@ namespace AoS2.Shared.Net
 
         public byte OwnLife;
 
+        /// <summary>
+        /// Klasse des Empfängers nach <see cref="AckInputTick"/>: Mit ihren Werten (Tempo, Kollisionshöhe, Waffen) rechnet die
+        /// Vorhersage die neueren Eingaben. Sie ändert sich nur beim Respawn.
+        /// </summary>
+        public byte OwnClass;
+
         public readonly List<PlayerSnapshot> Players = new List<PlayerSnapshot>();
         public readonly List<FallingSnapshot> Falling = new List<FallingSnapshot>();
 
@@ -296,6 +305,10 @@ namespace AoS2.Shared.Net
         private const byte FlagCrouching = 2;
         private const byte FlagAlive = 4;
         private const byte FlagBlending = 8;
+
+        /// <summary>Die Klasse steht in den oberen Bits der Spieler-Flags (0 … 7), so wird ein Spieler nicht größer.</summary>
+        private const int ClassShift = 4;
+        private const byte ClassMask = 7 << ClassShift;
 
         public void Write(NetWriter w)
         {
@@ -306,6 +319,7 @@ namespace AoS2.Shared.Net
             w.WriteByte(OwnHealth);
             w.WriteUShort(OwnRespawnTicks);
             w.WriteByte(OwnLife);
+            w.WriteByte(OwnClass);
             NetCodec.WriteWeapons(w, OwnWeapons);
             w.WriteByte((byte)Players.Count);
             foreach (var p in Players)
@@ -316,7 +330,7 @@ namespace AoS2.Shared.Net
                 w.WriteUShort(NetCodec.QuantizeYaw(p.Yaw));
                 w.WriteShort(NetCodec.QuantizePitch(p.Pitch));
                 w.WriteByte((byte)((p.OnGround ? FlagOnGround : 0) | (p.Crouching ? FlagCrouching : 0) |
-                                   (p.Alive ? FlagAlive : 0) | (blending ? FlagBlending : 0)));
+                                   (p.Alive ? FlagAlive : 0) | (blending ? FlagBlending : 0) | ((p.Class & 7) << ClassShift)));
                 w.WriteByte(p.Life);
                 w.WriteByte(p.Weapon);
                 NetCodec.WriteAnimation(w, p.Animation, blending);
@@ -335,6 +349,8 @@ namespace AoS2.Shared.Net
             s.OwnHealth = r.ReadByte();
             s.OwnRespawnTicks = r.ReadUShort();
             s.OwnLife = r.ReadByte();
+            s.OwnClass = r.ReadByte();
+            if (s.OwnClass > PlayerClasses.MaxClasses) throw new ProtocolException($"Ungültige Klasse {s.OwnClass}.");
             s.OwnWeapons = NetCodec.ReadWeapons(r);
             int players = r.ReadByte();
             if (players > NetLimits.MaxPlayers) throw new ProtocolException("Zu viele Spieler im Snapshot.");
@@ -348,7 +364,8 @@ namespace AoS2.Shared.Net
                     Pitch = NetCodec.DequantizePitch(r.ReadShort()),
                 };
                 var flags = r.ReadByte();
-                if ((flags & ~(FlagOnGround | FlagCrouching | FlagAlive | FlagBlending)) != 0) throw new ProtocolException("Unbekannte Spieler-Flags.");
+                if ((flags & ~(FlagOnGround | FlagCrouching | FlagAlive | FlagBlending | ClassMask)) != 0) throw new ProtocolException("Unbekannte Spieler-Flags.");
+                p.Class = (byte)((flags & ClassMask) >> ClassShift);
                 p.OnGround = (flags & FlagOnGround) != 0;
                 p.Crouching = (flags & FlagCrouching) != 0;
                 p.Alive = (flags & FlagAlive) != 0;
@@ -417,6 +434,11 @@ namespace AoS2.Shared.Net
 
         /// <summary>Antwort auf einen abgelehnten <see cref="TeamSelectRequest"/> (nur an den Absender).</summary>
         TeamDenied = 17,
+
+        // ---- Klassen (ab M8) ----
+
+        /// <summary>Neuer Blockvorrat des Empfängers (nur an ihn, beim Respawn). Nach Blockaktionen steht er in <see cref="EditResult"/>.</summary>
+        BlockSupply = 18,
     }
 
     /// <summary>Was ein Schuss getroffen hat (<see cref="WorldEventType.ShotFired"/>).</summary>
@@ -451,7 +473,7 @@ namespace AoS2.Shared.Net
         /// <summary>Wer geschossen hat (beim Schaden und Kill); <see cref="PlayerId"/> ist dann das Opfer.</summary>
         public byte Attacker;
 
-        /// <summary>Platz der Waffe (siehe weapons.json).</summary>
+        /// <summary>Waffen-ID (Stelle in weapons.json, <see cref="WeaponSettings.Id"/>; 0 = keine Waffe).</summary>
         public byte Weapon;
 
         /// <summary>Getroffene Zone (<see cref="Rig.HitZone"/>) oder <see cref="ExplosionZone"/>.</summary>
@@ -479,6 +501,11 @@ namespace AoS2.Shared.Net
         public MatchInfo Match;
         public TeamDenyReason DenyReason;
 
+        // ---- Klassen (ab M8) ----
+
+        /// <summary>Blockvorrat des Empfängers (<see cref="WorldEventType.EditResult"/>, <see cref="WorldEventType.BlockSupply"/>).</summary>
+        public ushort Supply;
+
         /// <summary>Zone bei Schaden durch eine Explosion.</summary>
         public const byte ExplosionZone = 255;
     }
@@ -498,11 +525,20 @@ namespace AoS2.Shared.Net
             w.WriteByte(id);
         }
 
-        public static void WriteEditResult(NetWriter w, ushort seq, BlockEditResult result)
+        /// <param name="blocks">Blockvorrat des Spielers nach dieser Aktion.</param>
+        public static void WriteEditResult(NetWriter w, ushort seq, BlockEditResult result, int blocks)
         {
             w.WriteByte((byte)WorldEventType.EditResult);
             w.WriteUShort(seq);
             w.WriteByte((byte)result);
+            w.WriteUShort((ushort)System.Math.Max(0, System.Math.Min(blocks, ushort.MaxValue)));
+        }
+
+        /// <summary>Neuer Blockvorrat (nur an den Spieler selbst, z. B. beim Respawn).</summary>
+        public static void WriteBlockSupply(NetWriter w, int blocks)
+        {
+            w.WriteByte((byte)WorldEventType.BlockSupply);
+            w.WriteUShort((ushort)System.Math.Max(0, System.Math.Min(blocks, ushort.MaxValue)));
         }
 
         /// <summary>Blöcke relativ zur kleinsten Ecke der Gruppe (Varints), damit große Gruppen klein bleiben.</summary>
@@ -650,7 +686,13 @@ namespace AoS2.Shared.Net
                         break;
                     case WorldEventType.EditResult:
                         e.Seq = r.ReadUShort();
-                        e.Result = (BlockEditResult)r.ReadByte();
+                        var result = r.ReadByte();
+                        if (result > (byte)BlockEditResult.NoBlocks) throw new ProtocolException($"Unbekanntes Ergebnis einer Blockaktion {result}.");
+                        e.Result = (BlockEditResult)result;
+                        e.Supply = r.ReadUShort();
+                        break;
+                    case WorldEventType.BlockSupply:
+                        e.Supply = r.ReadUShort();
                         break;
                     case WorldEventType.FallStart:
                         e.GroupId = (int)r.ReadVarUInt();

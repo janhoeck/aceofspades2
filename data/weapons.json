@@ -1,25 +1,46 @@
 {
-  "_comment": "Waffen (Zeiten in Sekunden, Längen in Blöcken, Geschwindigkeiten in Blöcken/s). Reihenfolge = Plätze 2, 3, 4 … (Platz 1 ist immer der Spaten). kind: hitscan (Strahl, sofort), grenade (geworfen, prallt ab, Zündzeit) oder rocket (fliegt gerade, explodiert beim Aufprall). damage: Grundschaden je Treffer, wird mit dem Faktor der Trefferzone aus combat.json multipliziert. blockDamage: Schaden an Blöcken je Treffer (Lebenspunkte der Blöcke in blocks.json). fireInterval: Zeit zwischen zwei Schüssen. automatic: gedrückt halten feuert weiter. magazine/reserve: Schuss im Magazin und in Reserve. reloadSeconds: 0 = kein Nachladen. explosion: radius/damage für Spieler (linear zum Rand hin weniger), blockRadius/blockDamage für Blöcke.",
+  "_comment": "Waffen (Zeiten in Sekunden, Längen in Blöcken, Geschwindigkeiten in Blöcken/s). Welche Klasse welche Waffe auf welchem Platz trägt, steht in classes.json (über den Namen). Die Reihenfolge hier ist die Waffen-ID im Protokoll: neue Waffen nur hinten anfügen. kind: hitscan (Strahl, sofort), grenade (geworfen, prallt ab, Zündzeit) oder rocket (fliegt gerade, explodiert beim Aufprall). damage: Grundschaden je Treffer, wird mit dem Faktor der Trefferzone aus combat.json multipliziert. falloff (nur hitscan, optional): bis start voller Schaden, dann linear weniger bis end, ab dort minFactor mal so viel. blockDamage: Schaden an Blöcken je Treffer (Lebenspunkte der Blöcke in blocks.json). fireInterval: Zeit zwischen zwei Schüssen (wird auf ganze Ticks gerundet, 1/60 s). automatic: gedrückt halten feuert weiter. magazine/reserve: Schuss im Magazin und in Reserve. reloadSeconds: 0 = kein Nachladen. zoom (optional): Vergrößerung mit der rechten Maustaste. model: Platzhalter-Modell im Client. explosion: radius/damage für Spieler (linear zum Rand hin weniger), blockRadius/blockDamage für Blöcke. Tabelle mit Treffern und Zeit bis zum Tod: dotnet run --project tools/AoS2.Balance",
   "weapons": [
     {
-      "name": "rifle", "displayName": "Sturmgewehr", "kind": "hitscan",
+      "name": "rifle", "displayName": "Sturmgewehr", "kind": "hitscan", "model": "ar15",
       "damage": 25, "blockDamage": 15, "range": 200,
+      "falloff": { "start": 40, "end": 100, "minFactor": 0.6 },
       "fireInterval": 0.1, "automatic": true,
       "magazine": 30, "reserve": 120, "reloadSeconds": 2.0
     },
     {
-      "name": "grenade", "displayName": "Granate", "kind": "grenade",
+      "name": "grenade", "displayName": "Granate", "kind": "grenade", "model": "grenade",
       "fireInterval": 1.0, "automatic": false,
       "magazine": 3, "reserve": 0, "reloadSeconds": 0,
       "speed": 15, "gravity": 22, "bounce": 0.35, "friction": 0.6, "fuseSeconds": 3.0, "lifetimeSeconds": 3.0,
       "explosion": { "radius": 4.5, "damage": 120, "blockRadius": 2.5, "blockDamage": 220 }
     },
     {
-      "name": "rocket", "displayName": "Raketenwerfer", "kind": "rocket",
+      "name": "rocket", "displayName": "Raketenwerfer", "kind": "rocket", "model": "rocket",
       "fireInterval": 0.8, "automatic": false,
       "magazine": 1, "reserve": 5, "reloadSeconds": 1.5,
       "speed": 35, "gravity": 0, "lifetimeSeconds": 5.0,
       "explosion": { "radius": 4.0, "damage": 120, "blockRadius": 3.0, "blockDamage": 260 }
+    },
+    {
+      "name": "smg", "displayName": "MP", "kind": "hitscan", "model": "mp5",
+      "damage": 20, "blockDamage": 10, "range": 150,
+      "falloff": { "start": 20, "end": 60, "minFactor": 0.5 },
+      "fireInterval": 0.0667, "automatic": true,
+      "magazine": 32, "reserve": 160, "reloadSeconds": 1.8
+    },
+    {
+      "name": "sniper", "displayName": "Scharfschützengewehr", "kind": "hitscan", "model": "sniper",
+      "damage": 70, "blockDamage": 40, "range": 300, "zoom": 4,
+      "fireInterval": 1.2, "automatic": false,
+      "magazine": 5, "reserve": 20, "reloadSeconds": 2.5
+    },
+    {
+      "name": "pistol", "displayName": "Pistole", "kind": "hitscan", "model": "pistol",
+      "damage": 30, "blockDamage": 10, "range": 120,
+      "falloff": { "start": 25, "end": 60, "minFactor": 0.5 },
+      "fireInterval": 0.2, "automatic": false,
+      "magazine": 8, "reserve": 32, "reloadSeconds": 1.5
     }
   ]
 }

@@ -169,7 +169,7 @@ Zusätzlich:
 |---|---|---|
 | Spielermodell (Grundkörper, Teamfarben-Maske) | P0 | M4 |
 | First-Person-Arme | P0 | M5 |
-| Klassen-Merkmale: Helm/Ausrüstung für Miner, Assault, Recon, Rocketeer | P1 | M8 |
+| Klassen-Merkmale: Helm/Ausrüstung für Miner, Assault, Recon, Rocketeer | P1 | M8 (Platzhalter im Spielermodell, seit M8 im Spiel sichtbar und Trefferzone) |
 
 **Animationen** (Third-Person für andere Spieler, teilweise First-Person):
 
@@ -193,7 +193,9 @@ Zusätzlich:
 | Granate | P0 |
 | Raketenwerfer + Rakete | P0 |
 | Scharfschützengewehr | P1 |
-| Weitere Klassenwaffen (aus M8) | P1 |
+| MP, Pistole (Klassenwaffen aus M8) | P1 |
+
+Seit M8 hat jede Waffe in `data/weapons.json` ein Feld `model` (`ar15`, `mp5`, `sniper`, `pistol`, `grenade`, `rocket`, der Spaten `shovel`). Der Client zeigt dafür Platzhalter aus Quadern (`WeaponView` in der Ich-Perspektive, `WeaponMeshes` in der Hand der anderen). Die Blockbench-Modelle in `assets-src/models/weapons` haben dieselben Namen; ihr Export (gedrehte Würfel, Texturen) kommt mit den fertigen Assets in M9.
 
 ### 6.4 Effekte (ab M5)
 
@@ -222,7 +224,7 @@ Zusätzlich:
 | Scoreboard, Punktestand | P0 | M6 |
 | Teamauswahl-Bildschirm | P0 | M6 |
 | Server-Browser | P0 | M7 |
-| Klassen-Icons (4) | P0 | M8 |
+| Klassen-Icons (4) | P0 | M8 (Platzhalter: Anfangsbuchstabe auf Klassenfarbe im Menü) |
 | Hauptmenü, Einstellungen | P1 | M9 |
 | Endgültiges Logo (nach Namensentscheidung) | P1 | M9 |
 

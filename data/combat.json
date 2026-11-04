@@ -1,9 +1,10 @@
 {
-  "_comment": "Kampfregeln (Zeiten in Sekunden). Gelesen von AoS2.Shared/Combat/CombatSettings.cs. health: Lebenspunkte beim Spawn. respawnSeconds: Wartezeit nach dem Tod. selfDamage: Faktor für Schaden durch eigene Explosionen (0 = keiner, 1 = voller). zones: Schadensfaktor je Trefferzone (Kopf, Rumpf, Arm, Bein), gilt für Treffer mit Hitscan-Waffen. switchSeconds: Zeit nach einem Waffenwechsel, bis die Waffe bereit ist. maxRewindSeconds: so weit spult der Lag-Ausgleich höchstens zurück.",
+  "_comment": "Kampfregeln (Zeiten in Sekunden). Gelesen von AoS2.Shared/Combat/CombatSettings.cs. health: Lebenspunkte beim Spawn (eine Klasse in classes.json kann eigene haben). respawnSeconds: Wartezeit nach dem Tod. selfDamage: Faktor für Schaden durch eigene Explosionen (0 = keiner, 1 = voller). zones: Schadensfaktor je Trefferzone (Kopf, Rumpf, Arm, Bein), gilt für Treffer mit Hitscan-Waffen. switchSeconds: Zeit nach einem Waffenwechsel, bis die Waffe bereit ist. maxRewindSeconds: so weit spult der Lag-Ausgleich höchstens zurück. minHitboxPixels: Würfel des Spielermodells, die in einer Richtung dünner sind (Pixel, 16 pro Block), sind nur Optik und keine Trefferzone (z. B. die Antenne des Recon).",
   "health": 100,
   "respawnSeconds": 5,
   "selfDamage": 1.0,
   "zones": { "head": 2.0, "torso": 1.0, "arm": 0.67, "leg": 0.67 },
   "switchSeconds": 0.3,
-  "maxRewindSeconds": 0.5
+  "maxRewindSeconds": 0.5,
+  "minHitboxPixels": 1
 }

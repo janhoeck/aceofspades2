@@ -7,7 +7,8 @@ namespace AoS2.Client.Player
 {
     /// <summary>
     /// Das sichtbare Spielermodell, gebaut aus <c>data/player_rig.json</c>: je Knochen ein Mesh aus seinen Würfeln (mit den
-    /// Texturkoordinaten aus Blockbench). Die Knochen setzt <see cref="Apply"/> aus der <see cref="PlayerPose"/> von
+    /// Texturkoordinaten aus Blockbench), dazu die Ausrüstung genau einer Klasse (Helm, Weste, Rucksack …), also genau die
+    /// Würfel, die der Server für diese Klasse als Trefferboxen prüft. Die Knochen setzt <see cref="Apply"/> aus der <see cref="PlayerPose"/> von
     /// AoS2.Shared, also mit denselben Zahlen, mit denen der Server die Trefferboxen prüft. Einen Unity-Animator gibt es
     /// für den Körper bewusst nicht, sonst könnten Bild und Trefferzonen auseinanderlaufen.
     /// <para>
@@ -21,20 +22,29 @@ namespace AoS2.Client.Player
         private Transform[] _bones;
         private Transform _weapon;
         private Renderer[] _renderers;
-        private int _weaponSlot = -1;
+        private string _weaponModel;
         private MaterialPropertyBlock _flash;
 
         /// <summary>Knochen der rechten Hand (für Waffe und Mündungsfeuer).</summary>
         public Transform RightHand { get; private set; }
 
         /// <summary>Mündung der Waffe in der Hand (Weltkoordinaten), nach <see cref="Apply"/>.</summary>
-        public Vector3 Muzzle => _weapon != null ? _weapon.TransformPoint(new Vector3(0, -WeaponLength(_weaponSlot), 0)) : transform.position + Vector3.up * 1.4f;
+        public Vector3 Muzzle => _weapon != null ? _weapon.TransformPoint(new Vector3(0, -WeaponMeshes.Length(_weaponModel), 0)) : transform.position + Vector3.up * 1.4f;
+
+        /// <summary>Ausrüstung, mit der das Modell gebaut ist (<c>null</c> = keine).</summary>
+        public string GearClass { get; private set; }
+
+        /// <summary>Würfel, die das Modell zeigt (für Tests: Grundkörper plus Ausrüstung von <see cref="GearClass"/>).</summary>
+        public int BoxCount { get; private set; }
 
         public static PlayerModel Create(PlayerRig rig, Material material, Material weaponMaterial, Transform parent, string name, string gearClass = null)
         {
             var root = new GameObject(name);
             root.transform.SetParent(parent, false);
             var model = root.AddComponent<PlayerModel>();
+            model.GearClass = gearClass;
+            foreach (var box in rig.Boxes)
+                if (PlayerPose.IsWorn(box, gearClass)) model.BoxCount++;
             model._bones = new Transform[rig.Bones.Count];
             var renderers = new List<Renderer>();
             var meshes = BuildMeshes(rig, gearClass);
@@ -66,8 +76,11 @@ namespace AoS2.Client.Player
             return model;
         }
 
-        /// <summary>Setzt alle Knochen aus der Pose, am Fußpunkt <paramref name="feet"/> mit Blick <paramref name="yaw"/>.</summary>
-        public void Apply(PlayerPose pose, Vec3 feet, float yaw, int weaponSlot)
+        /// <summary>
+        /// Setzt alle Knochen aus der Pose, am Fußpunkt <paramref name="feet"/> mit Blick <paramref name="yaw"/>, und zeigt die
+        /// Waffe <paramref name="weaponModel"/> in der Hand (<c>model</c> aus weapons.json, Spaten: <see cref="WeaponView.SpadeModel"/>).
+        /// </summary>
+        public void Apply(PlayerPose pose, Vec3 feet, float yaw, string weaponModel)
         {
             var toWorld = PlayerPose.ModelToWorld(feet, yaw);
             var turn = Quaternion.Euler(0, yaw, 0);
@@ -77,10 +90,10 @@ namespace AoS2.Client.Player
                 var position = toWorld.TransformPoint(m.Position);
                 _bones[i].SetPositionAndRotation(new Vector3(position.X, position.Y, position.Z), turn * MirroredRotation(m));
             }
-            if (weaponSlot != _weaponSlot)
+            if (weaponModel != _weaponModel)
             {
-                _weaponSlot = weaponSlot;
-                _weapon.GetComponent<MeshFilter>().sharedMesh = WeaponMeshes.ForSlot(weaponSlot);
+                _weaponModel = weaponModel;
+                _weapon.GetComponent<MeshFilter>().sharedMesh = WeaponMeshes.For(weaponModel);
             }
         }
 
@@ -111,8 +124,6 @@ namespace AoS2.Client.Player
             var up = new Vector3(m.M01, m.M11, -m.M21); // zweite Spalte, gespiegelt
             return Quaternion.LookRotation(forward, up);
         }
-
-        private static float WeaponLength(int slot) => slot == 1 ? 22 : slot == 3 ? 16 : 6;
 
         // ---- Meshes ----
 
@@ -147,7 +158,7 @@ namespace AoS2.Client.Player
                 var pivot = rig.Bones[bone].Pivot;
                 foreach (var box in rig.Boxes)
                 {
-                    if (box.Bone != bone || (box.Gear != null && box.Gear != gearClass)) continue;
+                    if (box.Bone != bone || !PlayerPose.IsWorn(box, gearClass)) continue;
                     for (var f = 0; f < 6; f++)
                     {
                         var uv = box.FaceUvs[f];
@@ -192,36 +203,68 @@ namespace AoS2.Client.Player
         }
     }
 
-    /// <summary>Platzhalter-Waffen aus Quadern (Pixel, im Knochen der rechten Hand: Arm zeigt nach −y).</summary>
+    /// <summary>
+    /// Platzhalter-Waffen aus Quadern (Pixel, im Knochen der rechten Hand: Arm zeigt nach −y), je <c>model</c> aus weapons.json.
+    /// Die fertigen Modelle aus Blockbench (assets-src/models/weapons) kommen in M9.
+    /// </summary>
     public static class WeaponMeshes
     {
-        private static readonly Dictionary<int, Mesh> Cache = new Dictionary<int, Mesh>();
+        private static readonly Dictionary<string, Mesh> Cache = new Dictionary<string, Mesh>();
 
-        public static Mesh ForSlot(int slot)
+        /// <summary>Länge bis zur Mündung (Pixel).</summary>
+        public static float Length(string model)
         {
-            if (Cache.TryGetValue(slot, out var mesh) && mesh != null) return mesh;
-            var boxes = new List<(Vector3 Min, Vector3 Max)>();
-            switch (slot)
+            switch (model)
             {
-                case 0: // Spaten: Stiel und Blatt
+                case "sniper": return 28;
+                case "rocket": return 16;
+                case "mp5": return 16;
+                case "pistol": return 10;
+                case "ar15": return 22;
+                default: return 6;
+            }
+        }
+
+        public static Mesh For(string model)
+        {
+            model ??= WeaponView.SpadeModel;
+            if (Cache.TryGetValue(model, out var mesh) && mesh != null) return mesh;
+            var boxes = new List<(Vector3 Min, Vector3 Max)>();
+            switch (model)
+            {
+                case WeaponView.SpadeModel: // Spaten: Stiel und Blatt
                     boxes.Add((new Vector3(-0.5f, -16, -0.5f), new Vector3(0.5f, -3, 0.5f)));
                     boxes.Add((new Vector3(-2, -21, -0.4f), new Vector3(2, -16, 0.4f)));
                     break;
-                case 1: // Gewehr: Lauf, Gehäuse, Magazin
+                case "grenade": // Granate in der Hand
+                    boxes.Add((new Vector3(-1.5f, -7.5f, -1.5f), new Vector3(1.5f, -4, 1.5f)));
+                    break;
+                case "rocket": // Raketenwerfer: dickes Rohr über die Schulter
+                    boxes.Add((new Vector3(-1.8f, -16, -1.8f), new Vector3(1.8f, 6, 1.8f)));
+                    boxes.Add((new Vector3(-0.6f, -8, 1.8f), new Vector3(0.6f, -5, 4)));
+                    break;
+                case "mp5": // MP: kurzer Lauf, Gehäuse, langes Magazin
+                    boxes.Add((new Vector3(-0.5f, -16, -0.5f), new Vector3(0.5f, -9, 0.5f)));
+                    boxes.Add((new Vector3(-1, -10, -1.4f), new Vector3(1, -2, 1.2f)));
+                    boxes.Add((new Vector3(-0.6f, -8, 1.2f), new Vector3(0.6f, -6, 5)));
+                    break;
+                case "sniper": // Scharfschützengewehr: langer Lauf, Zielfernrohr
+                    boxes.Add((new Vector3(-0.5f, -28, -0.5f), new Vector3(0.5f, -12, 0.5f)));
+                    boxes.Add((new Vector3(-1, -13, -1.6f), new Vector3(1, -1, 1.2f)));
+                    boxes.Add((new Vector3(-0.8f, -11, -3.4f), new Vector3(0.8f, -5, -1.6f)));
+                    break;
+                case "pistol": // Pistole: Lauf und Griff
+                    boxes.Add((new Vector3(-0.6f, -10, -0.8f), new Vector3(0.6f, -4, 0.6f)));
+                    boxes.Add((new Vector3(-0.5f, -6, 0.6f), new Vector3(0.5f, -4, 2.6f)));
+                    break;
+                default: // Sturmgewehr: Lauf, Gehäuse, Magazin
                     boxes.Add((new Vector3(-0.6f, -22, -0.6f), new Vector3(0.6f, -10, 0.6f)));
                     boxes.Add((new Vector3(-1, -12, -1.6f), new Vector3(1, -2, 1.2f)));
                     boxes.Add((new Vector3(-0.7f, -9, 1.2f), new Vector3(0.7f, -6, 4)));
                     break;
-                case 2: // Granate in der Hand
-                    boxes.Add((new Vector3(-1.5f, -7.5f, -1.5f), new Vector3(1.5f, -4, 1.5f)));
-                    break;
-                default: // Raketenwerfer: dickes Rohr über die Schulter
-                    boxes.Add((new Vector3(-1.8f, -16, -1.8f), new Vector3(1.8f, 6, 1.8f)));
-                    boxes.Add((new Vector3(-0.6f, -8, 1.8f), new Vector3(0.6f, -5, 4)));
-                    break;
             }
-            mesh = BoxMesh(boxes, "Waffe " + slot);
-            Cache[slot] = mesh;
+            mesh = BoxMesh(boxes, "Waffe " + model);
+            Cache[model] = mesh;
             return mesh;
         }
 

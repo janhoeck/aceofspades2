@@ -17,6 +17,9 @@ public class CombatTests
     private static WeaponSettings Grenade => Combat.Weapons.Single(w => w.Name == "grenade");
     private static WeaponSettings Rocket => Combat.Weapons.Single(w => w.Name == "rocket");
 
+    /// <summary>Waffen wie vor M8 (Plätze 1 Gewehr, 2 Granate, 3 Rakete), Bewegung mit den Standardwerten.</summary>
+    private static readonly PlayerClass Loadout = TestData.Loadout(Combat, "rifle", "grenade", "rocket");
+
     [Fact]
     public void Settings_RealData_ParsedInTicks()
     {
@@ -25,8 +28,8 @@ public class CombatTests
         Assert.Equal(1f, Combat.SelfDamage);
         Assert.Equal(2f, Combat.ZoneFactor(HitZone.Head));
         Assert.Equal(0.67f, Combat.ZoneFactor(HitZone.Leg));
-        Assert.Equal(3, Combat.SlotCount);
-        Assert.Equal(1, Rifle.Slot);
+        Assert.Equal(6, Combat.Weapons.Count);
+        Assert.Equal(1, Rifle.Id); // Stelle in weapons.json
         Assert.Equal(WeaponKind.Hitscan, Rifle.Kind);
         Assert.Equal(6, Rifle.FireIntervalTicks); // 10 Schuss/s
         Assert.True(Rifle.Automatic);
@@ -52,22 +55,22 @@ public class CombatTests
     [Fact]
     public void Rifle_HoldFire_TenShotsPerSecond_ThenReloadsAutomatically()
     {
-        var w = WeaponState.Full(Combat, 1);
+        var w = WeaponState.Full(Loadout, 1);
         var shots = new List<int>();
         for (var tick = 0; tick < 60; tick++)
-            if (WeaponSim.Step(ref w, Hold(1), Combat) == 1) shots.Add(tick);
+            if (WeaponSim.Step(ref w, Hold(1), Loadout) == 1) shots.Add(tick);
         Assert.Equal(10, shots.Count);
         Assert.All(shots.Zip(shots.Skip(1)), p => Assert.Equal(6, p.Second - p.First));
         Assert.Equal(20, w.GetAmmo(1).Magazine);
 
-        for (var tick = 0; tick < 120; tick++) WeaponSim.Step(ref w, Hold(1), Combat);
+        for (var tick = 0; tick < 120; tick++) WeaponSim.Step(ref w, Hold(1), Loadout);
         Assert.Equal(0, w.GetAmmo(1).Magazine);
         Assert.True(w.Reload > 0, "leeres Magazin lädt von selbst nach");
         var before = w.GetAmmo(1).Reserve;
         for (var tick = 0; w.Reload > 0; tick++)
         {
             Assert.True(tick < Rifle.ReloadTicks);
-            Assert.Equal(0, WeaponSim.Step(ref w, Hold(1), Combat));
+            Assert.Equal(0, WeaponSim.Step(ref w, Hold(1), Loadout));
         }
         Assert.Equal(30, w.GetAmmo(1).Magazine);
         Assert.Equal(before - 30, w.GetAmmo(1).Reserve);
@@ -76,12 +79,12 @@ public class CombatTests
     [Fact]
     public void Rifle_ReloadButton_RefillsPartialMagazine()
     {
-        var w = WeaponState.Full(Combat, 1);
-        WeaponSim.Step(ref w, Hold(1), Combat);
+        var w = WeaponState.Full(Loadout, 1);
+        WeaponSim.Step(ref w, Hold(1), Loadout);
         Assert.Equal(29, w.GetAmmo(1).Magazine);
-        WeaponSim.Step(ref w, Hold(1, InputButtons.Reload), Combat);
+        WeaponSim.Step(ref w, Hold(1, InputButtons.Reload), Loadout);
         Assert.Equal(Rifle.ReloadTicks, w.Reload);
-        for (var i = 0; i < Rifle.ReloadTicks; i++) WeaponSim.Step(ref w, Hold(1, 0), Combat);
+        for (var i = 0; i < Rifle.ReloadTicks; i++) WeaponSim.Step(ref w, Hold(1, 0), Loadout);
         Assert.Equal(30, w.GetAmmo(1).Magazine);
         Assert.Equal(119, w.GetAmmo(1).Reserve);
     }
@@ -89,16 +92,16 @@ public class CombatTests
     [Fact]
     public void Grenade_OneThrowPerClick_ThreeInTotal()
     {
-        var w = WeaponState.Full(Combat, 2);
+        var w = WeaponState.Full(Loadout, 2);
         var thrown = 0;
         for (var tick = 0; tick < 200; tick++)
-            if (WeaponSim.Step(ref w, Hold(2), Combat) != 0) thrown++;
+            if (WeaponSim.Step(ref w, Hold(2), Loadout) != 0) thrown++;
         Assert.Equal(1, thrown); // gedrückt halten wirft nur einmal
 
         for (var click = 0; click < 10; click++)
         {
             for (var tick = 0; tick < 70; tick++)
-                if (WeaponSim.Step(ref w, Hold(2, tick < 5 ? InputButtons.Fire : 0), Combat) != 0) thrown++;
+                if (WeaponSim.Step(ref w, Hold(2, tick < 5 ? InputButtons.Fire : 0), Loadout) != 0) thrown++;
         }
         Assert.Equal(3, thrown);
         Assert.Equal(0, w.GetAmmo(2).Magazine);
@@ -108,18 +111,18 @@ public class CombatTests
     [Fact]
     public void Switch_WeaponNotReadyRightAway_ReloadCancelled()
     {
-        var w = WeaponState.Full(Combat, 0);
-        Assert.Equal(0, WeaponSim.Step(ref w, Hold(1), Combat)); // gerade gewechselt
+        var w = WeaponState.Full(Loadout, 0);
+        Assert.Equal(0, WeaponSim.Step(ref w, Hold(1), Loadout)); // gerade gewechselt
         var ticks = 1;
-        while (WeaponSim.Step(ref w, Hold(1), Combat) == 0) ticks++;
+        while (WeaponSim.Step(ref w, Hold(1), Loadout) == 0) ticks++;
         Assert.Equal(Combat.SwitchTicks, ticks); // feuert im Tick SwitchTicks nach dem Wechsel
 
-        WeaponSim.Step(ref w, Hold(1, InputButtons.Reload), Combat);
+        WeaponSim.Step(ref w, Hold(1, InputButtons.Reload), Loadout);
         Assert.True(w.Reload > 0);
-        WeaponSim.Step(ref w, Hold(3, 0), Combat);
+        WeaponSim.Step(ref w, Hold(3, 0), Loadout);
         Assert.Equal(0, w.Reload);
         Assert.Equal(3, w.Slot);
-        Assert.Equal(0, WeaponSim.Step(ref w, Hold(0), Combat)); // Spaten feuert nie
+        Assert.Equal(0, WeaponSim.Step(ref w, Hold(0), Loadout)); // Spaten feuert nie
     }
 
     [Fact]
@@ -128,8 +131,8 @@ public class CombatTests
         var world = TestData.FlatWorld();
         var m = new MovementSettings();
         var start = new PlayerState { Position = new Vec3(16, 4, 16), OnGround = true };
-        var client = new ClientPrediction(world, m, start, Combat);
-        var server = new ClientPrediction(world, m, start, Combat);
+        var client = new ClientPrediction(world, Loadout, start);
+        var server = new ClientPrediction(world, Loadout, start);
         var fired = 0;
         for (var t = 0; t < 200; t++)
         {
@@ -298,7 +301,7 @@ public class CombatTests
     [Fact]
     public void Snapshot_CombatFields_RoundTrip()
     {
-        var weapons = WeaponState.Full(Combat, 3);
+        var weapons = WeaponState.Full(Loadout, 3);
         weapons.Reload = 77;
         weapons.Cooldown = 5;
         weapons.SetAmmo(1, new WeaponAmmo(12, 34));

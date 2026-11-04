@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AoS2.Shared.Combat;
 using AoS2.Shared.Maps;
 using AoS2.Shared.Net;
 using AoS2.Shared.Net.Client;
@@ -11,7 +12,8 @@ namespace AoS2.Client
     /// Platzhalter-HUD: Fadenkreuz mit Trefferanzeige, Leben, Munition und Waffenplätze, Kill-Anzeige, Todesbildschirm mit
     /// Respawn-Countdown, roter Rand bei Schaden, gewählter Baublock, Steuerungshilfe, Ladefehler und im Netzspiel Server,
     /// Ping und die Namen der anderen Spieler. Seit M6 dazu: Punktestand der Teams, Team-Menü, Punktetabelle (Tab) und
-    /// Anzeige am Matchende. Erzeugt sich beim Start selbst. Wird in M9 durch richtiges UI ersetzt.
+    /// Anzeige am Matchende. Seit M8: Klassenwahl im selben Menü (M, K), Waffen und Blockvorrat der Klasse, Zielfernrohr.
+    /// Erzeugt sich beim Start selbst. Wird in M9 durch richtiges UI ersetzt.
     /// </summary>
     public sealed class Hud : MonoBehaviour
     {
@@ -31,6 +33,8 @@ namespace AoS2.Client
         private GUIStyle _button;
         private GUIStyle _small;
         private GUIStyle _huge;
+        private GUIStyle _cardTitle;
+        private GUIStyle _badge;
         private Texture2D _white;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -56,6 +60,8 @@ namespace AoS2.Client
             _button ??= new GUIStyle(GUI.skin.button) { fontSize = 18, fontStyle = FontStyle.Bold };
             _small ??= new GUIStyle(GUI.skin.label) { fontSize = 13, wordWrap = true };
             _huge ??= new GUIStyle(GUI.skin.label) { fontSize = 44, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+            _cardTitle ??= new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+            _badge ??= new GUIStyle(GUI.skin.label) { fontSize = 26, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             if (_white == null) _white = Texture2D.whiteTexture;
 
             if (game.LoadError != null)
@@ -74,9 +80,10 @@ namespace AoS2.Client
                 DrawDamageFlash(game.Feed);
             }
 
-            // Fadenkreuz: zwei dünne Balken mit dunklem Rand
+            // Fadenkreuz: zwei dünne Balken mit dunklem Rand (mit Zielfernrohr ein Absehen über den ganzen Schirm)
             float cx = Screen.width / 2f, cy = Screen.height / 2f;
-            if (alive)
+            if (alive && game.Player.Zoomed) DrawScope(cx, cy);
+            else if (alive)
             {
                 DrawCross(cx, cy, 10, 2, new Color(0, 0, 0, 0.6f), 1);
                 DrawCross(cx, cy, 10, 2, Color.white, 0);
@@ -87,14 +94,15 @@ namespace AoS2.Client
             if (player.Slot == 0)
             {
                 var selected = player.SelectedBlock;
+                var supply = online ? $"  ·  {session.BlocksLeft} / {session.Class.Blocks} Blöcke" : "";
                 if (selected != null)
-                    Shadowed(new Rect(0, Screen.height - 100, Screen.width, 30), $"Baublock: {selected.DisplayName} (B wechselt)", _center);
+                    Shadowed(new Rect(0, Screen.height - 100, Screen.width, 30), $"Baublock: {selected.DisplayName} (B wechselt){supply}", _center);
             }
             if (player.LastEditResult != BlockEditResult.Ok && Time.time - player.LastEditTime < 2f)
                 Shadowed(new Rect(0, Screen.height - 130, Screen.width, 26), EditMessage(player.LastEditResult), _center);
 
             var help = online
-                ? "WASD laufen · Leertaste springen · Strg ducken · Shift sprinten · 1 Spaten, 2–4 Waffen (Mausrad) · Linksklick feuern/abbauen · Rechtsklick bauen · R nachladen · M Team · Tab Punkte · Esc 2× Menü"
+                ? "WASD laufen · Leertaste springen · Strg ducken · Shift sprinten · 1 Spaten, 2–5 Waffen (Mausrad) · Linksklick feuern/abbauen · Rechtsklick bauen/zielen · R nachladen · K Klasse · M Team · Tab Punkte · Esc 2× Menü"
                 : "WASD laufen · Leertaste springen · Strg ducken · Shift sprinten · Linksklick abbauen · Rechtsklick bauen · B Baublock · Esc 2× Menü (Waffen nur online)";
             Shadowed(new Rect(12, 8, 1600, 24), help, _text);
             if (Cursor.lockState != CursorLockMode.Locked && !game.TeamMenuOpen)
@@ -115,7 +123,7 @@ namespace AoS2.Client
                 if (game.TeamMenuOpen) DrawTeamMenu(game);
                 return;
             }
-            DrawHealth(session.Health, game.Combat.Health, session.Team);
+            DrawHealth(session.Health, session.Class.Health, session.Team, session.Class, session.NextClass);
             DrawWeapons(game, player);
             if (alive && !session.MatchOver && session.Zones.InSpawnZone(player.State.Position))
                 Shadowed(new Rect(0, Screen.height - 160, Screen.width, 26), "Spawnzone: Hier kann niemand schießen und niemand getroffen werden.", _center);
@@ -169,17 +177,42 @@ namespace AoS2.Client
             Shadowed(new Rect(0, 90, Screen.width, 30), feed.TeamMessage, _center);
         }
 
-        /// <summary>Team-Menü: Blau, Grün oder automatisch. Gesperrt ist, was der Server ohnehin ablehnen würde.</summary>
+        /// <summary>
+        /// Menü „Klasse und Team“: oben die Klassen als Karten (Waffen, Blöcke, Tempo, Treffer bis zum Tod), unten die Teams
+        /// (Blau, Grün oder automatisch; gesperrt ist, was der Server ohnehin ablehnen würde). Wer noch kein Team hat, wählt
+        /// zuerst die Klasse und erscheint mit ihr, sobald er ein Team wählt. Mit K zeigt das Menü nur die Klassen.
+        /// </summary>
         private void DrawTeamMenu(GameClient game)
         {
             var session = game.Session;
-            const float w = 520, h = 250;
-            var rect = new Rect((Screen.width - w) / 2, (Screen.height - h) / 2, w, h);
+            var classes = session.Classes.All;
+            const float cardWidth = 250, cardHeight = 250, gap = 12;
+            var w = Mathf.Max(560, classes.Count * (cardWidth + gap) + gap);
+            var h = game.ClassMenuOnly ? 70 + cardHeight + 50 : 70 + cardHeight + 230;
+            var rect = new Rect((Screen.width - w) / 2, Mathf.Max(10, (Screen.height - h) / 2), w, h);
             Fill(rect, new Color(0, 0, 0, 0.8f));
-            Shadowed(new Rect(rect.x, rect.y + 12, w, 36), session.Team == Team.None ? "Team wählen" : "Team wechseln", _big);
+            var title = game.ClassMenuOnly ? "Klasse wählen" : session.Team == Team.None ? "Klasse und Team wählen" : "Klasse und Team";
+            Shadowed(new Rect(rect.x, rect.y + 12, w, 36), title, _big);
 
+            // ---- Klassen ----
+            var selected = game.MenuClass;
+            var card = new Rect(rect.x + gap, rect.y + 60, cardWidth, cardHeight);
+            for (var i = 0; i < classes.Count; i++)
+            {
+                DrawClassCard(card, classes[i], i + 1, classes[i] == selected, classes[i] == session.Class && session.Team != Team.None, game);
+                card.x += cardWidth + gap;
+            }
+            var classHint = session.Team == Team.None ? "Du erscheinst mit der markierten Klasse, sobald du ein Team wählst."
+                : session.Alive ? "Ein Wechsel gilt ab dem nächsten Spawn (nach dem nächsten Tod oder Teamwechsel)."
+                : "Du erscheinst beim Respawn mit der markierten Klasse.";
+            GUI.Label(new Rect(rect.x + gap, rect.y + 64 + cardHeight, w - 2 * gap, 22), classHint + (game.ClassMenuOnly ? "  ·  K oder Esc: schließen" : ""), _small);
+            if (game.ClassMenuOnly) return;
+
+            // ---- Teams ----
+            var top = rect.y + 100 + cardHeight;
+            Shadowed(new Rect(rect.x, top, w, 30), session.Team == Team.None ? "Team" : "Team wechseln", _center);
             var max = session.Match.PlayersPerTeam;
-            var button = new Rect(rect.x + 20, rect.y + 70, (w - 60) / 2, 70);
+            var button = new Rect(rect.x + 20, top + 36, (w - 60) / 2, 70);
             foreach (var team in new[] { Team.Blue, Team.Green })
             {
                 var old = GUI.backgroundColor;
@@ -191,12 +224,65 @@ namespace AoS2.Client
                 GUI.backgroundColor = old;
                 button.x += button.width + 20;
             }
-            if (GUI.Button(new Rect(rect.x + 20, rect.y + 150, w - 40, 36), "Automatisch (kleineres Team)", _button)) game.ChooseTeam(Team.None);
+            if (GUI.Button(new Rect(rect.x + 20, top + 116, w - 40, 36), "Automatisch (kleineres Team)", _button)) game.ChooseTeam(Team.None);
 
             var hint = session.Team == Team.None
                 ? "Ein Team darf höchstens einen Spieler mehr haben als das andere."
                 : "Beim Wechsel stirbst du und erscheinst nach der Respawn-Zeit im neuen Team.  ·  M oder Esc: schließen";
-            GUI.Label(new Rect(rect.x + 10, rect.y + 200, w - 20, 40), hint, _small);
+            GUI.Label(new Rect(rect.x + 10, top + 160, w - 20, 40), hint, _small);
+        }
+
+        /// <summary>Eine Klasse als Karte: Abzeichen, Name, Beschreibung, Waffen mit Tasten, Blöcke und Tempo. Klick wählt sie.</summary>
+        private void DrawClassCard(Rect r, PlayerClass cls, int number, bool selected, bool current, GameClient game)
+        {
+            var color = ClassColor(cls.Id);
+            Fill(r, selected ? new Color(color.r * 0.45f, color.g * 0.45f, color.b * 0.45f, 0.95f) : new Color(0.12f, 0.12f, 0.14f, 0.95f));
+            Frame(r, selected ? color : new Color(1, 1, 1, 0.2f), selected ? 3 : 1);
+            if (GUI.Button(r, GUIContent.none, GUIStyle.none)) game.ChooseClass(cls);
+
+            // Abzeichen (Platzhalter für die Klassen-Icons aus M9): Anfangsbuchstabe auf Klassenfarbe
+            var badge = new Rect(r.x + 10, r.y + 10, 44, 44);
+            Fill(badge, color);
+            var old = GUI.color;
+            GUI.color = Color.black;
+            GUI.Label(badge, cls.DisplayName.Substring(0, 1), _badge);
+            GUI.color = old;
+            GUI.Label(new Rect(r.x + 62, r.y + 8, r.width - 70, 26), cls.DisplayName, _cardTitle);
+            GUI.Label(new Rect(r.x + 62, r.y + 32, r.width - 70, 22), current ? "aktuell" : selected ? "gewählt" : $"Klasse {number}", _small);
+            GUI.Label(new Rect(r.x + 10, r.y + 60, r.width - 20, 54), cls.Description, _small);
+
+            var combat = game.Combat;
+            var y = r.y + 116;
+            GUI.Label(new Rect(r.x + 10, y, r.width - 20, 20), $"1  Spaten (Pause {cls.EditCooldownTicks / (float)combat.TickRate:0.0#} s)", _small);
+            for (var slot = 1; slot <= cls.SlotCount; slot++)
+            {
+                y += 19;
+                GUI.Label(new Rect(r.x + 10, y, r.width - 20, 20), $"{slot + 1}  {WeaponLine(cls.Weapon(slot), combat, cls.Health)}", _small);
+            }
+            var speed = cls.SpeedFactor > 1.001f ? $"schneller (+{(cls.SpeedFactor - 1) * 100:0} %)" : cls.SpeedFactor < 0.999f ? $"langsamer ({(cls.SpeedFactor - 1) * 100:0} %)" : "normales Tempo";
+            GUI.Label(new Rect(r.x + 10, r.yMax - 46, r.width - 20, 20), $"{cls.Blocks} Blöcke  ·  {speed}", _small);
+            GUI.Label(new Rect(r.x + 10, r.yMax - 26, r.width - 20, 20), $"{cls.Health} Leben", _small);
+        }
+
+        /// <summary>Waffe in einer Zeile: Name und wie viele Rumpftreffer aus der Nähe töten (Sprengstoff: Anzahl).</summary>
+        private static string WeaponLine(WeaponSettings w, CombatSettings combat, int health)
+        {
+            if (w.IsProjectile) return w.Reserve > 0 ? $"{w.DisplayName} ({w.Magazine} + {w.Reserve})" : $"{w.DisplayName} ×{w.Magazine}";
+            var hits = BalanceMath.HitsToKill(w, AoS2.Shared.Rig.HitZone.Torso, 0, combat, health);
+            return $"{w.DisplayName} ({hits} Rumpftreffer)";
+        }
+
+        /// <summary>Farbe des Abzeichens je Klasse (Reihenfolge aus classes.json).</summary>
+        private static Color ClassColor(int id)
+        {
+            switch (id)
+            {
+                case 1: return new Color(0.95f, 0.75f, 0.25f); // Miner: Gelb wie der Helm
+                case 2: return new Color(0.55f, 0.75f, 0.45f);
+                case 3: return new Color(0.7f, 0.6f, 0.45f);
+                case 4: return new Color(0.9f, 0.45f, 0.3f);
+                default: return new Color(0.7f, 0.7f, 0.75f);
+            }
         }
 
         /// <summary>Punktetabelle: beide Teams nebeneinander, Spieler nach Kills sortiert; der eigene Name ist hervorgehoben.</summary>
@@ -219,13 +305,15 @@ namespace AoS2.Client
                 GUI.Label(new Rect(x + 10, top + 4, colWidth - 20, 26), $"{GameClient.TeamName(team)}  ·  {session.Match.Score(team)} Punkte", _scoreboardTitle);
                 GUI.color = old;
                 GUI.Label(new Rect(x + 10, top + 30, colWidth - 20, rowHeight), "Spieler", _small);
+                GUI.Label(new Rect(x + colWidth - 220, top + 30, 90, rowHeight), "Klasse", _small);
                 GUI.Label(new Rect(x + colWidth - 130, top + 30, 60, rowHeight), "Kills", _small);
                 GUI.Label(new Rect(x + colWidth - 65, top + 30, 60, rowHeight), "Tode", _small);
                 var y = top + 52;
                 foreach (var row in players)
                 {
                     if (row.Me) Fill(new Rect(x + 4, y, colWidth - 8, rowHeight), new Color(1, 1, 1, 0.15f));
-                    GUI.Label(new Rect(x + 10, y, colWidth - 150, rowHeight), row.Name, _text);
+                    GUI.Label(new Rect(x + 10, y, colWidth - 240, rowHeight), row.Name, _text);
+                    GUI.Label(new Rect(x + colWidth - 220, y, 90, rowHeight), row.Class, _text);
                     GUI.Label(new Rect(x + colWidth - 130, y, 60, rowHeight), row.Kills.ToString(), _text);
                     GUI.Label(new Rect(x + colWidth - 65, y, 60, rowHeight), row.Deaths.ToString(), _text);
                     y += rowHeight;
@@ -241,17 +329,20 @@ namespace AoS2.Client
         private struct Row
         {
             public string Name;
+            public string Class;
             public int Kills;
             public int Deaths;
             public bool Me;
         }
 
+        private static string ClassName(PlayerClass cls) => cls == null || cls.Id == 0 ? "–" : cls.DisplayName;
+
         private static List<Row> PlayersOf(ClientSession session, Team team)
         {
             var rows = new List<Row>();
-            if (session.Team == team) rows.Add(new Row { Name = session.PlayerName, Kills = session.Kills, Deaths = session.Deaths, Me = true });
+            if (session.Team == team) rows.Add(new Row { Name = session.PlayerName, Class = ClassName(session.Class), Kills = session.Kills, Deaths = session.Deaths, Me = true });
             foreach (var p in session.RemotePlayers.Values)
-                if (p.Team == team) rows.Add(new Row { Name = p.Name, Kills = p.Kills, Deaths = p.Deaths });
+                if (p.Team == team) rows.Add(new Row { Name = p.Name, Class = ClassName(session.ClassOf(p.Id)), Kills = p.Kills, Deaths = p.Deaths });
             rows.Sort((a, b) => a.Kills != b.Kills ? b.Kills.CompareTo(a.Kills) : a.Deaths.CompareTo(b.Deaths));
             return rows;
         }
@@ -276,14 +367,15 @@ namespace AoS2.Client
 
         // ---- Kampf ----
 
-        private void DrawHealth(int health, int max, Team team)
+        private void DrawHealth(int health, int max, Team team, PlayerClass cls, PlayerClass next)
         {
             const float w = 220, h = 22;
             float x = 24, y = Screen.height - 50;
             var old = GUI.color;
             GUI.color = GameClient.TeamColor(team);
-            GUI.Label(new Rect(x, y - 26, w, 24), "Team " + GameClient.TeamName(team), _scoreboardTitle);
+            GUI.Label(new Rect(x, y - 26, 400, 24), $"Team {GameClient.TeamName(team)}  ·  {ClassName(cls)}", _scoreboardTitle);
             GUI.color = old;
+            if (next != null && next != cls) Shadowed(new Rect(x, y - 48, 400, 22), $"Nächster Spawn: {next.DisplayName} (K)", _text);
             var fraction = Mathf.Clamp01(health / (float)max);
             Fill(new Rect(x - 2, y - 2, w + 4, h + 4), new Color(0, 0, 0, 0.6f));
             Fill(new Rect(x, y, w * fraction, h), Color.Lerp(new Color(0.85f, 0.15f, 0.1f), new Color(0.3f, 0.8f, 0.3f), fraction));
@@ -292,11 +384,11 @@ namespace AoS2.Client
 
         private void DrawWeapons(GameClient game, Player.LocalPlayer player)
         {
-            var combat = game.Combat;
+            var cls = game.Session.Class;
             var weapons = player.Weapons;
             float right = Screen.width - 24, bottom = Screen.height - 24;
 
-            var weapon = combat.Weapon(player.Slot);
+            var weapon = cls.Weapon(player.Slot);
             if (weapon != null)
             {
                 var ammo = weapons.GetAmmo(player.Slot);
@@ -306,13 +398,14 @@ namespace AoS2.Client
             }
             else
             {
-                Shadowed(new Rect(right - 300, bottom - 64, 300, 24), "Spaten", _right);
+                Shadowed(new Rect(right - 300, bottom - 40, 300, 40), $"{game.Session.BlocksLeft}", _ammo);
+                Shadowed(new Rect(right - 300, bottom - 64, 300, 24), "Spaten  ·  Blöcke", _right);
             }
 
             // Plätze unten in der Mitte
-            var labels = new string[combat.SlotCount + 1];
+            var labels = new string[cls.SlotCount + 1];
             labels[0] = "1 Spaten";
-            for (var s = 1; s <= combat.SlotCount; s++) labels[s] = $"{s + 1} {combat.Weapon(s).DisplayName}";
+            for (var s = 1; s <= cls.SlotCount; s++) labels[s] = $"{s + 1} {cls.Weapon(s).DisplayName}";
             const float slotWidth = 150;
             var x0 = Screen.width / 2f - labels.Length * slotWidth / 2;
             for (var s = 0; s < labels.Length; s++)
@@ -349,9 +442,37 @@ namespace AoS2.Client
             var cause = feed.SwitchedTeam ? $"Teamwechsel zu {GameClient.TeamName(session.Team)}"
                 : feed.KilledBy != null ? $"Getötet von {feed.KilledBy} ({feed.KilledWith})" : "Du hast dich selbst erwischt";
             var seconds = Mathf.CeilToInt(session.RespawnTicks / (float)game.Movement.TickRate);
+            var next = game.MenuClass?.DisplayName ?? "";
             Fill(new Rect(0, 0, Screen.width, Screen.height), new Color(0.3f, 0, 0, 0.25f));
             Shadowed(new Rect(0, Screen.height / 2f - 70, Screen.width, 40), cause, _big);
-            Shadowed(new Rect(0, Screen.height / 2f - 20, Screen.width, 30), seconds > 0 ? $"Respawn in {seconds} s" : "Respawn …", _center);
+            Shadowed(new Rect(0, Screen.height / 2f - 20, Screen.width, 30), seconds > 0 ? $"Respawn in {seconds} s als {next}" : $"Respawn als {next} …", _center);
+            if (!game.TeamMenuOpen) Shadowed(new Rect(0, Screen.height / 2f + 12, Screen.width, 26), "K: Klasse wechseln", _name);
+        }
+
+        /// <summary>Zielfernrohr: schwarzer Rand mit rundem Ausschnitt (aus Balken angenähert) und Absehen über den ganzen Schirm.</summary>
+        private void DrawScope(float cx, float cy)
+        {
+            var radius = Screen.height * 0.45f;
+            var black = new Color(0, 0, 0, 0.92f);
+            Fill(new Rect(0, 0, cx - radius, Screen.height), black);
+            Fill(new Rect(cx + radius, 0, Screen.width - cx - radius, Screen.height), black);
+            const int steps = 24;
+            for (var i = 0; i < steps; i++)
+            {
+                // Je Zeile über und unter dem Kreis: was außerhalb des Kreises liegt, schwarz füllen.
+                var y0 = cy - radius + i * radius / steps;
+                var dy = cy - (y0 + radius / steps);
+                var half = Mathf.Sqrt(Mathf.Max(0, radius * radius - dy * dy));
+                var band = radius / steps + 1;
+                Fill(new Rect(cx - radius, y0, radius - half, band), black);
+                Fill(new Rect(cx + half, y0, radius - half, band), black);
+                var y1 = cy + radius - (i + 1) * radius / steps;
+                Fill(new Rect(cx - radius, y1, radius - half, band), black);
+                Fill(new Rect(cx + half, y1, radius - half, band), black);
+            }
+            Fill(new Rect(cx - radius, cy - 0.5f, 2 * radius, 1), new Color(0, 0, 0, 0.9f));
+            Fill(new Rect(cx - 0.5f, cy - radius, 1, 2 * radius), new Color(0, 0, 0, 0.9f));
+            Fill(new Rect(cx - 2, cy - 2, 4, 4), new Color(0.9f, 0.1f, 0.1f, 0.9f));
         }
 
         /// <summary>Kreuz aus vier Strichen schräg ums Fadenkreuz, wenn der Server einen eigenen Treffer meldet (rot bei Kill).</summary>
@@ -434,6 +555,7 @@ namespace AoS2.Client
                 case BlockEditResult.NoLineOfSight: return "Der Server sieht den Block von dir aus nicht.";
                 case BlockEditResult.ProtectedZone: return "Hier kann man nichts verändern (Spawnzone oder außerhalb der Kampfzone).";
                 case BlockEditResult.MatchOver: return "Das Match ist vorbei.";
+                case BlockEditResult.NoBlocks: return "Keine Blöcke mehr. Abbauen gibt Blöcke zurück, der Respawn füllt auf.";
                 case BlockEditResult.Dead: return "";
                 default: return "";
             }
